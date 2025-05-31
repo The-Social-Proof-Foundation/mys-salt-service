@@ -3,9 +3,9 @@ FROM rust:1.82 AS builder
 
 WORKDIR /app
 
-# Skip SQLx compile-time verification in Docker build
-ENV SQLX_OFFLINE=true
-ENV DATABASE_URL=postgres://postgres:postgres@localhost/dummy
+# Set dummy DATABASE_URL for SQLx compile-time checks
+# This is only used during compilation, not at runtime
+ENV DATABASE_URL=postgres://postgres:postgres@localhost:5432/dummy
 
 # Copy manifests
 COPY Cargo.toml Cargo.lock ./
