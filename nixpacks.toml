@@ -4,8 +4,5 @@ nixPkgs = ["rust-bin.stable.latest.default"]
 [phases.build]
 cmds = ["cargo build --release"]
 
-[variables]
-DATABASE_URL = "postgres://postgres:postgres@localhost:5432/dummy"
-
 [start]
 cmd = "./target/release/mys-salt-service" 

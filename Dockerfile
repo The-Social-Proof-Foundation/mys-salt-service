@@ -3,10 +3,6 @@ FROM rust:1.82 AS builder
 
 WORKDIR /app
 
-# Set dummy DATABASE_URL for SQLx compile-time checks
-# This is only used during compilation, not at runtime
-ENV DATABASE_URL=postgres://postgres:postgres@localhost:5432/dummy
-
 # Copy manifests
 COPY Cargo.toml Cargo.lock ./
 

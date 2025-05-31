@@ -34,8 +34,7 @@ impl SaltStore {
     ) -> Result<UserSalt> {
         let user_identifier = JwtValidator::generate_user_identifier(claims);
 
-        let salt = sqlx::query_as!(
-            UserSalt,
+        let salt = sqlx::query_as::<_, UserSalt>(
             r#"
             INSERT INTO user_salts (user_identifier, iss, aud, sub, encrypted_salt, encryption_version)
             VALUES ($1, $2, $3, $4, $5, 1)
@@ -50,15 +49,15 @@ impl SaltStore {
                 sub, 
                 encrypted_salt, 
                 encryption_version, 
-                created_at as "created_at!", 
-                updated_at as "updated_at!"
-            "#,
-            user_identifier,
-            claims.iss,
-            claims.aud,
-            claims.sub,
-            encrypted_salt
+                created_at, 
+                updated_at
+            "#
         )
+        .bind(&user_identifier)
+        .bind(&claims.iss)
+        .bind(&claims.aud)
+        .bind(&claims.sub)
+        .bind(encrypted_salt)
         .fetch_one(&self.pool)
         .await
         .context("Failed to store salt")?;
@@ -70,8 +69,7 @@ impl SaltStore {
     pub async fn get_salt(&self, claims: &JwtClaims) -> Result<Option<UserSalt>> {
         let user_identifier = JwtValidator::generate_user_identifier(claims);
 
-        let salt = sqlx::query_as!(
-            UserSalt,
+        let salt = sqlx::query_as::<_, UserSalt>(
             r#"
             SELECT 
                 id, 
@@ -81,13 +79,13 @@ impl SaltStore {
                 sub, 
                 encrypted_salt, 
                 encryption_version, 
-                created_at as "created_at!", 
-                updated_at as "updated_at!"
+                created_at, 
+                updated_at
             FROM user_salts
             WHERE user_identifier = $1
-            "#,
-            user_identifier
+            "#
         )
+        .bind(&user_identifier)
         .fetch_optional(&self.pool)
         .await
         .context("Failed to retrieve salt")?;
@@ -106,20 +104,20 @@ impl SaltStore {
         success: bool,
         error_message: Option<String>,
     ) -> Result<()> {
-        sqlx::query!(
+        sqlx::query(
             r#"
             INSERT INTO salt_audit_log 
             (user_identifier, action_type, ip_address, user_agent, jwt_hash, success, error_message)
             VALUES ($1, $2, $3, $4, $5, $6, $7)
-            "#,
-            user_identifier,
-            action_type.as_str(),
-            ip_address,
-            user_agent,
-            jwt_hash,
-            success,
-            error_message
+            "#
         )
+        .bind(user_identifier)
+        .bind(action_type.as_str())
+        .bind(&ip_address)
+        .bind(&user_agent)
+        .bind(&jwt_hash)
+        .bind(success)
+        .bind(&error_message)
         .execute(&self.pool)
         .await
         .context("Failed to log audit entry")?;
@@ -129,8 +127,7 @@ impl SaltStore {
 
     /// Get audit logs for a user
     pub async fn get_audit_logs(&self, user_identifier: &str) -> Result<Vec<AuditLogEntry>> {
-        let logs = sqlx::query_as!(
-            AuditLogEntry,
+        let logs = sqlx::query_as::<_, AuditLogEntry>(
             r#"
             SELECT 
                 id, 
@@ -139,16 +136,16 @@ impl SaltStore {
                 ip_address, 
                 user_agent, 
                 jwt_hash, 
-                success as "success!", 
+                success, 
                 error_message, 
-                created_at as "created_at!"
+                created_at
             FROM salt_audit_log
             WHERE user_identifier = $1
             ORDER BY created_at DESC
             LIMIT 100
-            "#,
-            user_identifier
+            "#
         )
+        .bind(user_identifier)
         .fetch_all(&self.pool)
         .await
         .context("Failed to retrieve audit logs")?;
@@ -158,16 +155,16 @@ impl SaltStore {
 
     /// Check rate limit for an identifier
     pub async fn check_rate_limit(&self, identifier: &str, window_minutes: i32, max_requests: i32) -> Result<bool> {
-        let count = sqlx::query_scalar!(
+        let count: i64 = sqlx::query_scalar(
             r#"
-            SELECT COUNT(*) as "count!"
+            SELECT COUNT(*)
             FROM rate_limit_entries
             WHERE identifier = $1
               AND window_start > NOW() - INTERVAL '1 minute' * $2::float
-            "#,
-            identifier,
-            window_minutes as f64
+            "#
         )
+        .bind(identifier)
+        .bind(window_minutes as f64)
         .fetch_one(&self.pool)
         .await
         .context("Failed to check rate limit")?;
@@ -177,13 +174,13 @@ impl SaltStore {
         }
 
         // Record the request
-        sqlx::query!(
+        sqlx::query(
             r#"
             INSERT INTO rate_limit_entries (identifier)
             VALUES ($1)
-            "#,
-            identifier
+            "#
         )
+        .bind(identifier)
         .execute(&self.pool)
         .await
         .context("Failed to record rate limit entry")?;
@@ -193,13 +190,13 @@ impl SaltStore {
 
     /// Clean up old rate limit entries
     pub async fn cleanup_rate_limits(&self, older_than_hours: i32) -> Result<u64> {
-        let result = sqlx::query!(
+        let result = sqlx::query(
             r#"
             DELETE FROM rate_limit_entries
             WHERE window_start < NOW() - INTERVAL '1 hour' * $1::float
-            "#,
-            older_than_hours as f64
+            "#
         )
+        .bind(older_than_hours as f64)
         .execute(&self.pool)
         .await
         .context("Failed to cleanup rate limits")?;

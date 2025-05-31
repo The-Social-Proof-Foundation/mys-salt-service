@@ -163,7 +163,7 @@ pub async fn health_check(
     State(state): State<AppState>,
 ) -> Result<Json<HealthCheckResponse>, StatusCode> {
     // Check database connectivity
-    match sqlx::query!("SELECT 1 as check")
+    match sqlx::query("SELECT 1 as check")
         .fetch_one(state.store.pool())
         .await
     {
