@@ -2,7 +2,11 @@
   "$schema": "https://railway.app/railway.schema.json",
   "build": {
     "builder": "NIXPACKS",
-    "buildCommand": "cargo build --release"
+    "buildCommand": "cargo build --release",
+    "buildEnvironment": {
+      "SQLX_OFFLINE": "true",
+      "DATABASE_URL": "postgres://postgres:postgres@localhost/dummy"
+    }
   },
   "deploy": {
     "startCommand": "./target/release/mys-salt-service",

@@ -4,5 +4,9 @@ nixPkgs = ["rust-bin.stable.latest.default"]
 [phases.build]
 cmds = ["cargo build --release"]
 
+[variables]
+SQLX_OFFLINE = "true"
+DATABASE_URL = "postgres://postgres:postgres@localhost/dummy"
+
 [start]
 cmd = "./target/release/mys-salt-service" 
