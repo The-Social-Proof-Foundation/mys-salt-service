@@ -97,7 +97,7 @@ Set these in Railway dashboard:
 ```bash
 DATABASE_URL=<your-postgresql-url>
 MASTER_SEED=<base64-encoded-seed>
-PORT=8080
+PORT=3000
 ALLOWED_ORIGINS=https://wallet.mysocial.network
 RATE_LIMIT=60
 LOG_LEVEL=info
