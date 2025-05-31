@@ -6,13 +6,12 @@ use chacha20poly1305::{
     ChaCha20Poly1305, Key, Nonce,
 };
 use rand::RngCore;
-use sha2::{Digest, Sha256};
+use sha2::{Sha256, Digest};
 use base64::{Engine as _, engine::general_purpose};
 
 use crate::models::JwtClaims;
 
 const NONCE_SIZE: usize = 12;
-// const KEY_SIZE: usize = 32;
 
 #[derive(Clone)]
 pub struct SaltManager {
@@ -28,7 +27,7 @@ impl SaltManager {
         }
 
         // Derive encryption key from master seed
-        let mut hasher = Sha256::new();
+        let mut hasher = <Sha256 as Digest>::new();
         hasher.update(b"MYSOCIAL_ENCRYPTION_KEY_V1");
         hasher.update(&master_seed);
         let key_bytes = hasher.finalize();
@@ -42,7 +41,7 @@ impl SaltManager {
 
     /// Generate a deterministic salt from JWT claims
     pub fn generate_salt(&self, claims: &JwtClaims) -> Result<Vec<u8>> {
-        let mut hasher = Sha256::new();
+        let mut hasher = <Sha256 as Digest>::new();
         
         // Domain separation for versioning
         hasher.update(b"MYSOCIAL_SALT_V1");
@@ -98,15 +97,16 @@ impl SaltManager {
 }
 
 /// Generate a secure random master seed
-// pub fn generate_master_seed() -> Vec<u8> {
-//     let mut seed = vec![0u8; 64]; // 512 bits
-//     OsRng.fill_bytes(&mut seed);
-//     seed
-// }
+#[allow(dead_code)]
+pub fn generate_master_seed() -> Vec<u8> {
+    let mut seed = vec![0u8; 64]; // 512 bits
+    OsRng.fill_bytes(&mut seed);
+    seed
+}
 
 /// Hash a JWT for audit logging
 pub fn hash_jwt_for_audit(jwt: &str) -> String {
-    let mut hasher = Sha256::new();
+    let mut hasher = <Sha256 as Digest>::new();
     hasher.update(jwt.as_bytes());
     general_purpose::STANDARD.encode(hasher.finalize())
 }
