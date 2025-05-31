@@ -2,7 +2,7 @@
 nixPkgs = ["rust-bin.stable.latest.default"]
 
 [phases.build]
-cmds = ["cargo build --release"]
+cmds = ["cargo build --release --bin mys-salt-service"]
 
 [start]
-cmd = "./target/release/mys-salt-service" 
+cmd = "target/release/mys-salt-service" 
