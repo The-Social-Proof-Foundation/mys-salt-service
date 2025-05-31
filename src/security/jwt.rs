@@ -27,6 +27,10 @@ impl JwtValidator {
             "https://www.facebook.com".to_string(),
             OAuthProviderConfig::facebook(),
         );
+        providers.insert(
+            "https://appleid.apple.com".to_string(),
+            OAuthProviderConfig::apple(),
+        );
 
         Self {
             client: Client::builder()
@@ -46,7 +50,14 @@ impl JwtValidator {
         let kid = header.kid.context("JWT missing key ID")?;
 
         // Extract issuer from unverified claims to determine provider
-        let unverified = jsonwebtoken::dangerous_insecure_decode::<Value>(jwt)
+        let unverified_validation = {
+            let mut v = Validation::default();
+            v.insecure_disable_signature_validation();
+            v.validate_exp = false;
+            v
+        };
+        
+        let unverified = decode::<Value>(jwt, &DecodingKey::from_secret(b"dummy"), &unverified_validation)
             .context("Failed to decode JWT")?;
         
         let iss = unverified.claims["iss"]

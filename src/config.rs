@@ -23,7 +23,7 @@ impl Config {
             master_seed_base64: env::var("MASTER_SEED")
                 .context("MASTER_SEED not set")?,
             port: env::var("PORT")
-                .unwrap_or_else(|_| "8080".to_string())
+                .unwrap_or_else(|_| "3000".to_string())
                 .parse()
                 .context("Invalid PORT")?,
             allowed_origins: env::var("ALLOWED_ORIGINS")

@@ -102,4 +102,13 @@ impl OAuthProviderConfig {
             userinfo_endpoint: Some("https://graph.facebook.com/me".to_string()),
         }
     }
+    
+    pub fn apple() -> Self {
+        Self {
+            issuer: "https://appleid.apple.com".to_string(),
+            jwks_uri: "https://appleid.apple.com/auth/keys".to_string(),
+            token_endpoint: Some("https://appleid.apple.com/auth/token".to_string()),
+            userinfo_endpoint: None, // Apple doesn't provide a userinfo endpoint
+        }
+    }
 } 

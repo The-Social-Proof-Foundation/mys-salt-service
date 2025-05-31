@@ -1,7 +1,5 @@
 use anyhow::{Context, Result};
-use chrono::Utc;
 use sqlx::{postgres::PgPoolOptions, PgPool};
-use uuid::Uuid;
 
 use crate::models::{ActionType, AuditLogEntry, JwtClaims, UserSalt};
 use crate::security::jwt::JwtValidator;
@@ -44,7 +42,16 @@ impl SaltStore {
             ON CONFLICT (user_identifier) DO UPDATE
             SET encrypted_salt = EXCLUDED.encrypted_salt,
                 updated_at = CURRENT_TIMESTAMP
-            RETURNING id, user_identifier, iss, aud, sub, encrypted_salt, encryption_version, created_at, updated_at
+            RETURNING 
+                id, 
+                user_identifier, 
+                iss, 
+                aud, 
+                sub, 
+                encrypted_salt, 
+                encryption_version, 
+                created_at as "created_at!", 
+                updated_at as "updated_at!"
             "#,
             user_identifier,
             claims.iss,
@@ -66,7 +73,16 @@ impl SaltStore {
         let salt = sqlx::query_as!(
             UserSalt,
             r#"
-            SELECT id, user_identifier, iss, aud, sub, encrypted_salt, encryption_version, created_at, updated_at
+            SELECT 
+                id, 
+                user_identifier, 
+                iss, 
+                aud, 
+                sub, 
+                encrypted_salt, 
+                encryption_version, 
+                created_at as "created_at!", 
+                updated_at as "updated_at!"
             FROM user_salts
             WHERE user_identifier = $1
             "#,
@@ -94,7 +110,7 @@ impl SaltStore {
             r#"
             INSERT INTO salt_audit_log 
             (user_identifier, action_type, ip_address, user_agent, jwt_hash, success, error_message)
-            VALUES ($1, $2, $3::inet, $4, $5, $6, $7)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             "#,
             user_identifier,
             action_type.as_str(),
@@ -116,8 +132,16 @@ impl SaltStore {
         let logs = sqlx::query_as!(
             AuditLogEntry,
             r#"
-            SELECT id, user_identifier, action_type, ip_address::text as "ip_address?", 
-                   user_agent, jwt_hash, success, error_message, created_at
+            SELECT 
+                id, 
+                user_identifier, 
+                action_type, 
+                ip_address, 
+                user_agent, 
+                jwt_hash, 
+                success as "success!", 
+                error_message, 
+                created_at as "created_at!"
             FROM salt_audit_log
             WHERE user_identifier = $1
             ORDER BY created_at DESC
@@ -139,10 +163,10 @@ impl SaltStore {
             SELECT COUNT(*) as "count!"
             FROM rate_limit_entries
             WHERE identifier = $1
-              AND window_start > NOW() - INTERVAL '$2 minutes'
+              AND window_start > NOW() - INTERVAL '1 minute' * $2::float
             "#,
             identifier,
-            window_minutes
+            window_minutes as f64
         )
         .fetch_one(&self.pool)
         .await
@@ -172,9 +196,9 @@ impl SaltStore {
         let result = sqlx::query!(
             r#"
             DELETE FROM rate_limit_entries
-            WHERE window_start < NOW() - INTERVAL '$1 hours'
+            WHERE window_start < NOW() - INTERVAL '1 hour' * $1::float
             "#,
-            older_than_hours
+            older_than_hours as f64
         )
         .execute(&self.pool)
         .await

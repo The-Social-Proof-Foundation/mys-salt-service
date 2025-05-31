@@ -14,9 +14,8 @@ use axum::{
 use base64::{Engine as _, engine::general_purpose};
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::signal;
-use tower::ServiceBuilder;
 use tower_http::{
-    cors::{Any, CorsLayer},
+    cors::CorsLayer,
     limit::RequestBodyLimitLayer,
     trace::TraceLayer,
 };
@@ -50,7 +49,7 @@ async fn main() -> Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    info!("Starting MYS Salt Service");
+    info!("Starting the MySocial Salt Service");
 
     // Load configuration
     let config = Config::from_env()?;
@@ -85,7 +84,7 @@ async fn main() -> Result<()> {
     };
 
     // Build router
-    let app = build_router(state, &config.allowed_origins);
+    let app = build_router(state.clone(), &config.allowed_origins);
 
     // Start background tasks
     tokio::spawn(cleanup_task(state.store.clone()));
@@ -118,6 +117,7 @@ fn build_router(state: AppState, allowed_origins: &[String]) -> Router {
     Router::new()
         .route("/health", get(handlers::health_check))
         .route("/salt", post(handlers::get_salt))
+        .route("/salt/test", post(handlers::get_salt_test))
         .route("/metrics", get(handlers::get_metrics))
         .with_state(state)
         .layer(RequestBodyLimitLayer::new(1024 * 1024)) // 1MB limit

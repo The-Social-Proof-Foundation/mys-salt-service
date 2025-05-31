@@ -1,6 +1,6 @@
- # MYS Salt Service
+ # MySocial Salt Service
 
-A production-ready salt backup service for zkLogin, based on [Mysten Labs architecture](https://blog.sui.io/zklogin-salt-server-architecture/) but adapted for Railway deployment.
+A production-ready salt backup service for zkLogin, based on [Mysten Labs architecture](https://blog.sui.io/zklogin-salt-server-architecture/).
 
 ## Overview
 

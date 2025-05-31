@@ -1,6 +1,6 @@
 pub mod jwt;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use chacha20poly1305::{
     aead::{Aead, KeyInit, OsRng},
     ChaCha20Poly1305, Key, Nonce,
@@ -12,7 +12,7 @@ use base64::{Engine as _, engine::general_purpose};
 use crate::models::JwtClaims;
 
 const NONCE_SIZE: usize = 12;
-const KEY_SIZE: usize = 32;
+// const KEY_SIZE: usize = 32;
 
 #[derive(Clone)]
 pub struct SaltManager {
@@ -67,7 +67,7 @@ impl SaltManager {
         // Encrypt the salt
         let ciphertext = cipher
             .encrypt(nonce, salt)
-            .context("Failed to encrypt salt")?;
+            .map_err(|e| anyhow::anyhow!("Encryption failed: {:?}", e))?;
         
         // Prepend nonce to ciphertext
         let mut result = nonce_bytes.to_vec();
@@ -91,18 +91,18 @@ impl SaltManager {
         // Decrypt
         let salt = cipher
             .decrypt(nonce, ciphertext)
-            .context("Failed to decrypt salt")?;
+            .map_err(|e| anyhow::anyhow!("Decryption failed: {:?}", e))?;
         
         Ok(salt)
     }
 }
 
 /// Generate a secure random master seed
-pub fn generate_master_seed() -> Vec<u8> {
-    let mut seed = vec![0u8; 64]; // 512 bits
-    OsRng.fill_bytes(&mut seed);
-    seed
-}
+// pub fn generate_master_seed() -> Vec<u8> {
+//     let mut seed = vec![0u8; 64]; // 512 bits
+//     OsRng.fill_bytes(&mut seed);
+//     seed
+// }
 
 /// Hash a JWT for audit logging
 pub fn hash_jwt_for_audit(jwt: &str) -> String {

@@ -1,7 +1,6 @@
 use axum::{
     extract::{State, Json, ConnectInfo},
-    http::{StatusCode, HeaderMap},
-    response::IntoResponse,
+    http::{StatusCode, HeaderMap}
 };
 use base64::{Engine as _, engine::general_purpose};
 use std::net::SocketAddr;
@@ -181,22 +180,98 @@ pub async fn health_check(
 }
 
 /// Get audit logs for a user (admin endpoint)
-pub async fn get_audit_logs(
-    State(state): State<AppState>,
-    user_identifier: String,
-) -> Result<impl IntoResponse, StatusCode> {
-    match state.store.get_audit_logs(&user_identifier).await {
-        Ok(logs) => Ok(Json(logs)),
-        Err(e) => {
-            error!("Failed to retrieve audit logs: {}", e);
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
-        }
-    }
-}
+// pub async fn get_audit_logs(
+//     State(state): State<AppState>,
+//     user_identifier: String,
+// ) -> Result<impl IntoResponse, StatusCode> {
+//     match state.store.get_audit_logs(&user_identifier).await {
+//         Ok(logs) => Ok(Json(logs)),
+//         Err(e) => {
+//             error!("Failed to retrieve audit logs: {}", e);
+//             Err(StatusCode::INTERNAL_SERVER_ERROR)
+//         }
+//     }
+// }
 
 /// Get service metrics
 pub async fn get_metrics(
     State(state): State<AppState>,
 ) -> Json<crate::monitoring::MetricsSnapshot> {
     Json(state.metrics.get_stats())
+}
+
+/// Test endpoint for development - accepts simple JWTs
+pub async fn get_salt_test(
+    State(state): State<AppState>,
+    ConnectInfo(_addr): ConnectInfo<SocketAddr>,
+    Json(request): Json<GetSaltRequest>,
+) -> Result<Json<GetSaltResponse>, (StatusCode, String)> {
+    // Only allow in non-production environments
+    if std::env::var("ENVIRONMENT").unwrap_or_default() == "production" {
+        return Err((StatusCode::NOT_FOUND, "Not found".to_string()));
+    }
+
+    state.metrics.increment_requests();
+    
+    // let ip_address = addr.ip().to_string();
+    // let user_agent = headers
+    //     .get("user-agent")
+    //     .and_then(|v| v.to_str().ok())
+    //     .map(|s| s.to_string());
+
+    // Decode the JWT without validation for testing
+    let parts: Vec<&str> = request.jwt.split('.').collect();
+    if parts.len() != 3 {
+        return Err((StatusCode::BAD_REQUEST, "Invalid JWT format".to_string()));
+    }
+
+    // Decode payload
+    let payload_bytes = base64::Engine::decode(
+        &general_purpose::URL_SAFE_NO_PAD,
+        parts[1]
+    ).map_err(|_| (StatusCode::BAD_REQUEST, "Invalid base64 in JWT".to_string()))?;
+    
+    let payload: serde_json::Value = serde_json::from_slice(&payload_bytes)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid JSON in JWT payload".to_string()))?;
+
+    // Create fake claims for testing
+    let claims = crate::models::JwtClaims {
+        iss: payload.get("iss")
+            .and_then(|v| v.as_str())
+            .unwrap_or("https://test.example.com")
+            .to_string(),
+        aud: payload.get("aud")
+            .and_then(|v| v.as_str())
+            .unwrap_or("test-client-id")
+            .to_string(),
+        sub: payload.get("sub")
+            .and_then(|v| v.as_str())
+            .unwrap_or("test-user-id")
+            .to_string(),
+        exp: payload.get("exp").and_then(|v| v.as_i64()).unwrap_or(1999999999),
+        iat: payload.get("iat").and_then(|v| v.as_i64()).unwrap_or(1516239022),
+        nonce: None,
+        email: payload.get("email").and_then(|v| v.as_str()).map(|s| s.to_string()),
+    };
+
+    let user_identifier = JwtValidator::generate_user_identifier(&claims);
+    // let jwt_hash = hash_jwt_for_audit(&request.jwt);
+
+    // Generate salt (same logic as production)
+    let salt = state
+        .salt_manager
+        .generate_salt(&claims)
+        .map_err(|e| {
+            error!("Failed to generate salt: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, "Generation error".to_string())
+        })?;
+
+    // Log for testing
+    info!("Test endpoint: Generated salt for claims: {:?}", claims);
+    info!("Test endpoint: User identifier: {}", user_identifier);
+
+    state.metrics.increment_success();
+    Ok(Json(GetSaltResponse {
+        salt: general_purpose::STANDARD.encode(salt),
+    }))
 } 
