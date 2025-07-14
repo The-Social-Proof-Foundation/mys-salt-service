@@ -3,7 +3,6 @@ use axum::{
     http::{StatusCode, HeaderMap}
 };
 use base64::engine::general_purpose;
-use num_bigint::BigUint;
 use std::net::SocketAddr;
 use tracing::{error, info, warn};
 
@@ -13,21 +12,14 @@ use crate::{
     security::{jwt::JwtValidator, hash_jwt_for_audit},
 };
 
-// BN254 field modulus for zkSNARK compatibility. This is a mathematical constant for the BN254 elliptic curve field
-const BN254_FIELD_MODULUS: &str = "21888242871839275222246405745257275088548364400416034343698204186575808495617";
-
-/// Convert salt bytes to numeric string for zkLogin compatibility
-/// Constrains the salt to the BN254 field modulus for zkSNARK compatibility
-fn salt_to_numeric_string(salt_bytes: &[u8]) -> String {
-    let bn254_modulus = BigUint::parse_bytes(BN254_FIELD_MODULUS.as_bytes(), 10)
-        .expect("Failed to parse BN254 modulus");
+/// Convert salt bytes to hex string for zkLogin compatibility
+/// Takes the first 16 bytes and converts to a 32-character hex string
+fn salt_to_hex_string(salt_bytes: &[u8]) -> String {
+    // Take first 16 bytes (128 bits) for zkLogin compatibility
+    let salt_16_bytes = &salt_bytes[..16.min(salt_bytes.len())];
     
-    let salt_bigint = BigUint::from_bytes_be(salt_bytes);
-    
-    // Apply modulo operation to constrain salt within BN254 field
-    let constrained_salt = salt_bigint % bn254_modulus;
-    
-    constrained_salt.to_string()
+    // Convert to hex string (32 characters)
+    hex::encode(salt_16_bytes)
 }
 
 /// Handle salt generation/retrieval requests
@@ -172,7 +164,7 @@ pub async fn get_salt(
 
     state.metrics.increment_success();
     Ok(Json(GetSaltResponse {
-        salt: salt_to_numeric_string(&salt),
+        salt: salt_to_hex_string(&salt),
     }))
 }
 
@@ -295,6 +287,6 @@ pub async fn get_salt_test(
 
     state.metrics.increment_success();
     Ok(Json(GetSaltResponse {
-        salt: salt_to_numeric_string(&salt),
+        salt: salt_to_hex_string(&salt),
     }))
 } 

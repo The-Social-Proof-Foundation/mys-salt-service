@@ -29,8 +29,7 @@ argon2 = "0.5"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-# Big integer arithmetic for zkLogin compatibility
-num-bigint = "0.4"
+
 
 # Logging & Monitoring
 tracing = "0.1"
@@ -49,3 +48,4 @@ governor = "0.6"
 
 # Health checks
 axum-server-timing = "0.3" 
+hex = "0.4.3"
