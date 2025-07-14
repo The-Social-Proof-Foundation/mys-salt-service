@@ -252,6 +252,11 @@ pub async fn get_salt_test(
         iat: payload.get("iat").and_then(|v| v.as_i64()).unwrap_or(1516239022),
         nonce: None,
         email: payload.get("email").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        email_verified: payload.get("email_verified").and_then(|v| v.as_bool()),
+        name: payload.get("name").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        picture: payload.get("picture").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        given_name: payload.get("given_name").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        family_name: payload.get("family_name").and_then(|v| v.as_str()).map(|s| s.to_string()),
     };
 
     let user_identifier = JwtValidator::generate_user_identifier(&claims);

@@ -32,12 +32,58 @@ pub struct AuditLogEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JwtClaims {
     pub iss: String,  // Issuer
-    pub aud: String,  // Audience
+    #[serde(deserialize_with = "deserialize_audience")]
+    pub aud: String,  // Audience (can be string or array, we take first if array)
     pub sub: String,  // Subject (user ID)
     pub exp: i64,     // Expiration
     pub iat: i64,     // Issued at
     pub nonce: Option<String>,
     pub email: Option<String>,
+    // Add common Google JWT fields that we might want to use
+    pub email_verified: Option<bool>,
+    pub name: Option<String>,
+    pub picture: Option<String>,
+    pub given_name: Option<String>,
+    pub family_name: Option<String>,
+}
+
+// Custom deserializer for audience field to handle both string and array
+fn deserialize_audience<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::{self, Visitor};
+    use std::fmt;
+    
+    struct AudienceVisitor;
+    
+    impl<'de> Visitor<'de> for AudienceVisitor {
+        type Value = String;
+        
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("a string or array of strings")
+        }
+        
+        fn visit_str<E>(self, value: &str) -> Result<String, E>
+        where
+            E: de::Error,
+        {
+            Ok(value.to_owned())
+        }
+        
+        fn visit_seq<S>(self, mut seq: S) -> Result<String, S::Error>
+        where
+            S: de::SeqAccess<'de>,
+        {
+            if let Some(first) = seq.next_element::<String>()? {
+                Ok(first)
+            } else {
+                Err(de::Error::custom("audience array is empty"))
+            }
+        }
+    }
+    
+    deserializer.deserialize_any(AudienceVisitor)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
