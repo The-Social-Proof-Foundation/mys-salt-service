@@ -95,7 +95,7 @@ pub async fn get_salt(
                 None,
             ).await;
 
-            info!("Retrieved existing salt for user: {}", user_identifier);
+            info!("Successfully retrieved existing salt for user: {}", user_identifier);
             state.metrics.increment_salt_retrieved();
             decrypted
         }
@@ -141,7 +141,7 @@ pub async fn get_salt(
                 None,
             ).await;
 
-            info!("Created new salt for user: {}", user_identifier);
+            info!("Successfully created new salt for user: {}", user_identifier);
             state.metrics.increment_salt_created();
             salt
         }

@@ -128,6 +128,11 @@ mod tests {
             iat: 1234567890,
             nonce: None,
             email: None,
+            email_verified: None,
+            name: None,
+            picture: None,
+            given_name: None,
+            family_name: None,
         };
         
         let salt1 = manager.generate_salt(&claims).unwrap();
