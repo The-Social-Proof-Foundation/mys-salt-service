@@ -2,7 +2,8 @@ use axum::{
     extract::{State, Json, ConnectInfo},
     http::{StatusCode, HeaderMap}
 };
-use base64::{Engine as _, engine::general_purpose};
+use base64::engine::general_purpose;
+use num_bigint::BigUint;
 use std::net::SocketAddr;
 use tracing::{error, info, warn};
 
@@ -11,6 +12,12 @@ use crate::{
     models::{GetSaltRequest, GetSaltResponse, HealthCheckResponse, ActionType},
     security::{jwt::JwtValidator, hash_jwt_for_audit},
 };
+
+/// Convert salt bytes to numeric string for zkLogin compatibility
+fn salt_to_numeric_string(salt_bytes: &[u8]) -> String {
+    let salt_bigint = BigUint::from_bytes_be(salt_bytes);
+    salt_bigint.to_string()
+}
 
 /// Handle salt generation/retrieval requests
 pub async fn get_salt(
@@ -154,7 +161,7 @@ pub async fn get_salt(
 
     state.metrics.increment_success();
     Ok(Json(GetSaltResponse {
-        salt: general_purpose::STANDARD.encode(salt),
+        salt: salt_to_numeric_string(&salt),
     }))
 }
 
@@ -277,6 +284,6 @@ pub async fn get_salt_test(
 
     state.metrics.increment_success();
     Ok(Json(GetSaltResponse {
-        salt: general_purpose::STANDARD.encode(salt),
+        salt: salt_to_numeric_string(&salt),
     }))
 } 

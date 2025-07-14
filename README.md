@@ -1,6 +1,6 @@
  # MySocial Salt Service
 
-A production-ready salt backup service for zkLogin, based on [Mysten Labs architecture](https://blog.sui.io/zklogin-salt-server-architecture/).
+A production-ready salt backup service for zkLogin.
 
 ## Overview
 
