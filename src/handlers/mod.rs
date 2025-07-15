@@ -12,14 +12,20 @@ use crate::{
     security::{jwt::JwtValidator, hash_jwt_for_audit},
 };
 
-/// Convert salt bytes to hex string for zkLogin compatibility
-/// Takes the first 16 bytes and converts to a 32-character hex string
-fn salt_to_hex_string(salt_bytes: &[u8]) -> String {
+/// Convert salt bytes to BigInt string for zkLogin compatibility
+/// Takes the first 16 bytes and converts to a BigInt decimal string
+fn salt_to_bigint_string(salt_bytes: &[u8]) -> String {
     // Take first 16 bytes (128 bits) for zkLogin compatibility
     let salt_16_bytes = &salt_bytes[..16.min(salt_bytes.len())];
     
-    // Convert to hex string (32 characters)
-    hex::encode(salt_16_bytes)
+    // Convert bytes to BigInt by treating as big-endian integer
+    let mut result = 0u128;
+    for &byte in salt_16_bytes {
+        result = (result << 8) | (byte as u128);
+    }
+    
+    // Return as decimal string (BigInt format)
+    result.to_string()
 }
 
 /// Handle salt generation/retrieval requests
@@ -164,7 +170,7 @@ pub async fn get_salt(
 
     state.metrics.increment_success();
     Ok(Json(GetSaltResponse {
-        salt: salt_to_hex_string(&salt),
+        salt: salt_to_bigint_string(&salt),
     }))
 }
 
@@ -287,6 +293,6 @@ pub async fn get_salt_test(
 
     state.metrics.increment_success();
     Ok(Json(GetSaltResponse {
-        salt: salt_to_hex_string(&salt),
+        salt: salt_to_bigint_string(&salt),
     }))
 } 
