@@ -20,12 +20,6 @@ fn salt_to_bigint_string(salt_bytes: &[u8]) -> String {
     
     // Convert bytes to hex string (32 characters for 16 bytes)
     let hex_salt = hex::encode(salt_bytes);
-    tracing::debug!("Salt hex (should be 32 chars): {} (length: {})", hex_salt, hex_salt.len());
-    tracing::debug!("Salt bytes length: {} bytes = {} bits", salt_bytes.len(), salt_bytes.len() * 8);
-    
-    // Convert hex to BigInt following zkLogin standard: BigInt('0x' + hex)
-    let hex_with_prefix = format!("0x{}", hex_salt);
-    tracing::debug!("Salt with 0x prefix: {}", hex_with_prefix);
     
     // Parse as hex BigInt and convert to decimal string
     let bigint_value = u128::from_str_radix(&hex_salt, 16)
