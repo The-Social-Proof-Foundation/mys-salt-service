@@ -1355,6 +1355,7 @@ dependencies = [
  "config",
  "dotenvy",
  "governor",
+ "hex",
  "jsonwebtoken",
  "rand",
  "reqwest",

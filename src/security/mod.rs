@@ -40,6 +40,7 @@ impl SaltManager {
     }
 
     /// Generate a deterministic salt from JWT claims
+    /// Returns exactly 16 bytes (128 bits) for zkLogin compatibility
     pub fn generate_salt(&self, claims: &JwtClaims) -> Result<Vec<u8>> {
         let mut hasher = <Sha256 as Digest>::new();
         
@@ -50,7 +51,10 @@ impl SaltManager {
         hasher.update(claims.aud.as_bytes());
         hasher.update(claims.sub.as_bytes());
         
-        let salt = hasher.finalize().to_vec();
+        let hash = hasher.finalize();
+        
+        // Take exactly first 16 bytes for zkLogin compatibility (128 bits)
+        let salt = hash[..16].to_vec();
         Ok(salt)
     }
 
