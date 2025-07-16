@@ -15,11 +15,19 @@ use crate::{
 /// Convert salt bytes to BigInt string for zkLogin compatibility
 /// Converts exactly 16 bytes to a BigInt decimal string following zkLogin standards
 fn salt_to_bigint_string(salt_bytes: &[u8]) -> String {
-    // Verify we have exactly 16 bytes for zkLogin compatibility
-    assert_eq!(salt_bytes.len(), 16, "Salt must be exactly 16 bytes for zkLogin");
+    // zkLogin requires exactly 16 bytes (128 bits), but handle legacy 32-byte salts
+    let salt_16_bytes = if salt_bytes.len() == 32 {
+        // Legacy 32-byte salt - take first 16 bytes for zkLogin compatibility
+        &salt_bytes[0..16]
+    } else if salt_bytes.len() == 16 {
+        // Modern 16-byte salt - use as-is
+        salt_bytes
+    } else {
+        panic!("Salt must be either 16 bytes (new format) or 32 bytes (legacy format), got {} bytes", salt_bytes.len());
+    };
     
     // Convert bytes to hex string (32 characters for 16 bytes)
-    let hex_salt = hex::encode(salt_bytes);
+    let hex_salt = hex::encode(salt_16_bytes);
     
     // Parse as hex BigInt and convert to decimal string
     let bigint_value = u128::from_str_radix(&hex_salt, 16)

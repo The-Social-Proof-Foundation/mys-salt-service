@@ -27,7 +27,7 @@ impl Config {
                 .parse()
                 .context("Invalid PORT")?,
             allowed_origins: env::var("ALLOWED_ORIGINS")
-                .unwrap_or_else(|_| "https://wallet.mysocial.network".to_string())
+                .unwrap_or_else(|_| "https://mysocial.network,http://localhost:3000".to_string())
                 .split(',')
                 .map(|s| s.trim().to_string())
                 .collect(),
