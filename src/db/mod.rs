@@ -205,13 +205,4 @@ impl SaltStore {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_rate_limiting() {
-        // This would require a test database
-        // For production, we'd set up proper integration tests
-    }
-} 
+// Integration tests for DB live under `tests/` and require a live database.

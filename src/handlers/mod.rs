@@ -7,9 +7,9 @@ use std::net::SocketAddr;
 use tracing::{error, info, warn};
 
 use crate::{
-    AppState,
     models::{GetSaltRequest, GetSaltResponse, HealthCheckResponse, ActionType},
     security::{jwt::JwtValidator, hash_jwt_for_audit},
+    state::AppState,
 };
 
 /// Convert salt bytes to BigInt string for zkLogin compatibility
@@ -304,4 +304,4 @@ pub async fn get_salt_test(
     Ok(Json(GetSaltResponse {
         salt: salt_to_bigint_string(&salt),
     }))
-} 
+}

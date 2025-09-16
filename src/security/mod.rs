@@ -41,18 +41,20 @@ impl SaltManager {
 
     /// Generate a deterministic salt from JWT claims
     /// Returns exactly 16 bytes (128 bits) for zkLogin compatibility
+    ///
+    /// Important: Use only the stable user identifier (`sub`) and the server's
+    /// master seed to avoid variability across platforms (e.g., differing
+    /// `aud`, `iat`, `nonce`).
     pub fn generate_salt(&self, claims: &JwtClaims) -> Result<Vec<u8>> {
         let mut hasher = <Sha256 as Digest>::new();
-        
-        // Domain separation for versioning
+
+        // Domain separation for versioning and server binding
         hasher.update(b"MYSOCIAL_SALT_V1");
         hasher.update(&self.master_seed);
-        hasher.update(claims.iss.as_bytes());
-        hasher.update(claims.aud.as_bytes());
         hasher.update(claims.sub.as_bytes());
-        
+
         let hash = hasher.finalize();
-        
+
         // Take exactly first 16 bytes for zkLogin compatibility (128 bits)
         let salt = hash[..16].to_vec();
         Ok(salt)
@@ -127,7 +129,7 @@ mod tests {
         let claims = JwtClaims {
             iss: "https://accounts.google.com".to_string(),
             aud: "test-app".to_string(),
-            sub: "user123".to_string(),
+            sub: "111631294628286022835".to_string(),
             exp: 1234567890,
             iat: 1234567890,
             nonce: None,
@@ -156,4 +158,46 @@ mod tests {
         
         assert_eq!(salt.to_vec(), decrypted, "Encryption/decryption roundtrip should work");
     }
-} 
+
+    #[test]
+    fn test_salt_same_across_platforms() {
+        let seed = generate_master_seed();
+        let manager = SaltManager::new(seed).unwrap();
+
+        // Same user sub, different audiences/issuers/timestamps
+        let claims_web = JwtClaims {
+            iss: "https://accounts.google.com".to_string(),
+            aud: "web-client-id".to_string(),
+            sub: "111631294628286022835".to_string(),
+            exp: 2000000000,
+            iat: 1500000000,
+            nonce: None,
+            email: None,
+            email_verified: None,
+            name: None,
+            picture: None,
+            given_name: None,
+            family_name: None,
+        };
+
+        let claims_ios = JwtClaims {
+            iss: "https://accounts.google.com".to_string(),
+            aud: "ios-client-id".to_string(),
+            sub: "111631294628286022835".to_string(),
+            exp: 2100000000,
+            iat: 1600000000,
+            nonce: Some("random".to_string()),
+            email: None,
+            email_verified: None,
+            name: None,
+            picture: None,
+            given_name: None,
+            family_name: None,
+        };
+
+        let salt_web = manager.generate_salt(&claims_web).unwrap();
+        let salt_ios = manager.generate_salt(&claims_ios).unwrap();
+
+        assert_eq!(salt_web, salt_ios, "Salts must match across platforms for same user sub");
+    }
+}

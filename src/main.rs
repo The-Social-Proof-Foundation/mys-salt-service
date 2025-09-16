@@ -1,10 +1,3 @@
-mod config;
-mod db;
-mod handlers;
-mod models;
-mod monitoring;
-mod security;
-
 use anyhow::{Context, Result};
 use axum::{
     Router,
@@ -22,21 +15,13 @@ use tower_http::{
 use tracing::{info, error};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use crate::{
+use mys_salt_service::{
     config::Config,
     db::SaltStore,
     monitoring::Metrics,
+    state::AppState,
     security::{SaltManager, jwt::JwtValidator},
 };
-
-#[derive(Clone)]
-pub struct AppState {
-    pub config: Arc<Config>,
-    pub store: SaltStore,
-    pub salt_manager: Arc<SaltManager>,
-    pub jwt_validator: Arc<JwtValidator>,
-    pub metrics: Arc<Metrics>,
-}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -115,10 +100,10 @@ fn build_router(state: AppState, allowed_origins: &[String]) -> Router {
         .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]);
 
     Router::new()
-        .route("/health", get(handlers::health_check))
-        .route("/salt", post(handlers::get_salt))
-        .route("/salt/test", post(handlers::get_salt_test))
-        .route("/metrics", get(handlers::get_metrics))
+        .route("/health", get(mys_salt_service::handlers::health_check))
+        .route("/salt", post(mys_salt_service::handlers::get_salt))
+        .route("/salt/test", post(mys_salt_service::handlers::get_salt_test))
+        .route("/metrics", get(mys_salt_service::handlers::get_metrics))
         .with_state(state)
         .layer(RequestBodyLimitLayer::new(1024 * 1024)) // 1MB limit
         .layer(cors)

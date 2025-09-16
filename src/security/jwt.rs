@@ -151,7 +151,8 @@ impl JwtValidator {
 
     /// Generate user identifier from claims
     pub fn generate_user_identifier(claims: &JwtClaims) -> String {
-        format!("{}:{}:{}", claims.iss, claims.aud, claims.sub)
+        // Unify across platforms/clients: key by issuer + subject only
+        format!("{}:{}", claims.iss, claims.sub)
     }
 }
 
@@ -164,7 +165,7 @@ mod tests {
         let claims = JwtClaims {
             iss: "https://accounts.google.com".to_string(),
             aud: "test-app".to_string(),
-            sub: "user123".to_string(),
+            sub: "111631294628286022835".to_string(),
             exp: 1234567890,
             iat: 1234567890,
             nonce: None,
@@ -177,6 +178,6 @@ mod tests {
         };
 
         let identifier = JwtValidator::generate_user_identifier(&claims);
-        assert_eq!(identifier, "https://accounts.google.com:test-app:user123");
+        assert_eq!(identifier, "https://accounts.google.com:111631294628286022835");
     }
 } 

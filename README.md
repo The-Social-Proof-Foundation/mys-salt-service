@@ -6,7 +6,7 @@ A production-ready salt backup service for zkLogin.
 
 This service provides secure salt generation and storage for zkLogin authentication, ensuring that:
 - User identities remain private and cannot be traced back to Web2 credentials
-- Salts are deterministically generated per user per app
+- Salts are deterministically generated per user (consistent across platforms)
 - All operations are audited and rate-limited
 - Data is encrypted at rest
 
@@ -216,7 +216,3 @@ Set up monitoring for:
 3. Add tests for new features
 4. Ensure all tests pass
 5. Submit pull request
-
-## License
-
-[Your License Here]
