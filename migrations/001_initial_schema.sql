@@ -14,8 +14,8 @@ CREATE TABLE user_salts (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- Indexes for efficient lookups (unified across platforms by issuer + subject)
-CREATE INDEX idx_user_lookup ON user_salts (iss, sub);
+-- Indexes for efficient lookups
+CREATE INDEX idx_user_lookup ON user_salts (iss, aud, sub);
 CREATE INDEX idx_user_identifier ON user_salts (user_identifier);
 
 -- Audit log table
