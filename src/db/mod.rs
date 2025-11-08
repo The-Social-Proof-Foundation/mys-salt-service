@@ -27,20 +27,22 @@ impl SaltStore {
     }
 
     /// Store encrypted salt for a user
+    /// Returns the stored salt, or None if a salt already exists (to handle race conditions)
+    /// This function NEVER overwrites existing salts - salts are immutable once created
     pub async fn store_salt(
         &self,
         claims: &JwtClaims,
         encrypted_salt: &[u8],
-    ) -> Result<UserSalt> {
+    ) -> Result<Option<UserSalt>> {
         let user_identifier = JwtValidator::generate_user_identifier(claims);
 
-        let salt = sqlx::query_as::<_, UserSalt>(
+        // Try to insert, but do nothing if salt already exists (ON CONFLICT DO NOTHING)
+        // This prevents race conditions where two requests try to create a salt simultaneously
+        let result = sqlx::query_as::<_, UserSalt>(
             r#"
             INSERT INTO user_salts (user_identifier, iss, aud, sub, encrypted_salt, encryption_version)
             VALUES ($1, $2, $3, $4, $5, 1)
-            ON CONFLICT (user_identifier) DO UPDATE
-            SET encrypted_salt = EXCLUDED.encrypted_salt,
-                updated_at = CURRENT_TIMESTAMP
+            ON CONFLICT (user_identifier) DO NOTHING
             RETURNING 
                 id, 
                 user_identifier, 
@@ -58,16 +60,24 @@ impl SaltStore {
         .bind(&claims.aud)
         .bind(&claims.sub)
         .bind(encrypted_salt)
-        .fetch_one(&self.pool)
+        .fetch_optional(&self.pool)
         .await
         .context("Failed to store salt")?;
 
-        Ok(salt)
+        Ok(result)
     }
 
     /// Retrieve encrypted salt for a user
     pub async fn get_salt(&self, claims: &JwtClaims) -> Result<Option<UserSalt>> {
         let user_identifier = JwtValidator::generate_user_identifier(claims);
+
+        // Log the database query for debugging
+        tracing::debug!(
+            "Querying salt for user_identifier: {} (iss: {}, sub: {})",
+            user_identifier,
+            claims.iss,
+            claims.sub
+        );
 
         let salt = sqlx::query_as::<_, UserSalt>(
             r#"

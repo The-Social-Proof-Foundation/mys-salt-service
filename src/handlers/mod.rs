@@ -5,6 +5,7 @@ use axum::{
 use base64::engine::general_purpose;
 use std::net::SocketAddr;
 use tracing::{error, info, warn};
+use hex;
 
 use crate::{
     models::{GetSaltRequest, GetSaltResponse, HealthCheckResponse, ActionType},
@@ -96,6 +97,12 @@ pub async fn get_salt(
     let user_identifier = JwtValidator::generate_user_identifier(&claims);
     let jwt_hash = hash_jwt_for_audit(&request.jwt);
 
+    // Log the lookup attempt for debugging
+    info!(
+        "Salt lookup for user: {} (iss: {}, sub: {})",
+        user_identifier, claims.iss, claims.sub
+    );
+
     // Check or generate salt
     let salt = match state.store.get_salt(&claims).await {
         Ok(Some(existing)) => {
@@ -145,30 +152,135 @@ pub async fn get_salt(
                     (StatusCode::INTERNAL_SERVER_ERROR, "Encryption error".to_string())
                 })?;
 
-            state
-                .store
-                .store_salt(&claims, &encrypted)
-                .await
-                .map_err(|e| {
+            // Try to store salt - handle race condition where another request created it first
+            match state.store.store_salt(&claims, &encrypted).await {
+                Ok(Some(stored_salt)) => {
+                    // Successfully inserted new salt
+                    // Decrypt to return the plain salt
+                    let decrypted = state
+                        .salt_manager
+                        .decrypt_salt(&stored_salt.encrypted_salt)
+                        .map_err(|e| {
+                            error!("Failed to decrypt newly stored salt: {}", e);
+                            state.metrics.increment_failed();
+                            (StatusCode::INTERNAL_SERVER_ERROR, "Decryption error".to_string())
+                        })?;
+
+                    // Verify the decrypted salt matches what we generated (consistency check)
+                    if decrypted != salt {
+                        error!(
+                            "CRITICAL: Stored salt mismatch for user {} - generated: {:?}, stored: {:?}",
+                            user_identifier,
+                            hex::encode(&salt),
+                            hex::encode(&decrypted)
+                        );
+                        state.metrics.increment_failed();
+                        return Err((
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Salt consistency check failed".to_string(),
+                        ));
+                    }
+
+                    // Log creation
+                    let _ = state.store.log_audit(
+                        &user_identifier,
+                        ActionType::Create,
+                        Some(ip_address),
+                        user_agent,
+                        Some(jwt_hash),
+                        true,
+                        None,
+                    ).await;
+
+                    info!("Successfully created new salt for user: {}", user_identifier);
+                    state.metrics.increment_salt_created();
+                    salt
+                }
+                Ok(None) => {
+                    // Race condition: another request created the salt first
+                    // Retrieve the existing salt
+                    warn!(
+                        "Race condition detected for user {} - salt was created by another request, retrieving existing salt",
+                        user_identifier
+                    );
+                    
+                    match state.store.get_salt(&claims).await {
+                        Ok(Some(existing)) => {
+                            // Decrypt existing salt
+                            let decrypted = state
+                                .salt_manager
+                                .decrypt_salt(&existing.encrypted_salt)
+                                .map_err(|e| {
+                                    error!("Failed to decrypt existing salt after race condition: {}", e);
+                                    state.metrics.increment_failed();
+                                    (StatusCode::INTERNAL_SERVER_ERROR, "Decryption error".to_string())
+                                })?;
+
+                            // Verify consistency - the existing salt should match what we would generate
+                            if decrypted != salt {
+                                error!(
+                                    "CRITICAL: Salt mismatch after race condition for user {} - generated: {:?}, existing: {:?}",
+                                    user_identifier,
+                                    hex::encode(&salt),
+                                    hex::encode(&decrypted)
+                                );
+                                state.metrics.increment_failed();
+                                return Err((
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                    "Salt consistency check failed after race condition".to_string(),
+                                ));
+                            }
+
+                            // Log read action (since we're reading an existing salt)
+                            let _ = state.store.log_audit(
+                                &user_identifier,
+                                ActionType::Read,
+                                Some(ip_address),
+                                user_agent,
+                                Some(jwt_hash),
+                                true,
+                                None,
+                            ).await;
+
+                            info!(
+                                "Retrieved existing salt after race condition for user: {}",
+                                user_identifier
+                            );
+                            state.metrics.increment_salt_retrieved();
+                            decrypted
+                        }
+                        Ok(None) => {
+                            // This should never happen - we just tried to insert and got None,
+                            // but then get_salt also returns None
+                            error!(
+                                "CRITICAL: Salt disappeared for user {} - insert returned None and get_salt also returned None",
+                                user_identifier
+                            );
+                            state.metrics.increment_failed();
+                            return Err((
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                "Salt storage inconsistency detected".to_string(),
+                            ));
+                        }
+                        Err(e) => {
+                            error!("Failed to retrieve salt after race condition: {}", e);
+                            state.metrics.increment_failed();
+                            return Err((
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                "Database error".to_string(),
+                            ));
+                        }
+                    }
+                }
+                Err(e) => {
                     error!("Failed to store salt: {}", e);
                     state.metrics.increment_failed();
-                    (StatusCode::INTERNAL_SERVER_ERROR, "Storage error".to_string())
-                })?;
-
-            // Log creation
-            let _ = state.store.log_audit(
-                &user_identifier,
-                ActionType::Create,
-                Some(ip_address),
-                user_agent,
-                Some(jwt_hash),
-                true,
-                None,
-            ).await;
-
-            info!("Successfully created new salt for user: {}", user_identifier);
-            state.metrics.increment_salt_created();
-            salt
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Storage error".to_string(),
+                    ));
+                }
+            }
         }
         Err(e) => {
             error!("Database error: {}", e);
