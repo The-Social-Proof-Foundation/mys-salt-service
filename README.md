@@ -14,7 +14,8 @@ This service provides secure salt generation and storage for zkLogin authenticat
 
 - **Secure Salt Generation**: Deterministic salt generation using SHA-256 with domain separation
 - **Encryption at Rest**: ChaCha20-Poly1305 encryption for stored salts
-- **JWT Validation**: Support for Google and Facebook OAuth providers
+- **Multi-Provider Authentication**: Support for Google, Apple, Facebook, and Twitch OAuth providers
+- **Flexible Token Formats**: Accepts both JWT tokens (Google/Apple) and access tokens (Facebook/Twitch)
 - **Rate Limiting**: IP-based rate limiting to prevent abuse
 - **Audit Logging**: Comprehensive audit trail for all operations
 - **Health Monitoring**: Built-in health checks and metrics endpoints
@@ -101,6 +102,7 @@ PORT=3000
 ALLOWED_ORIGINS=https://wallet.mysocial.network
 RATE_LIMIT=60
 LOG_LEVEL=info
+TWITCH_CLIENT_ID=<your-twitch-client-id>  # Required for Twitch authentication
 ```
 
 ### 4. Deploy
@@ -114,19 +116,49 @@ railway up
 ### POST /salt
 Get or create salt for a user.
 
-Request:
+**Request Format 1: JWT Token (Google, Apple)**
 ```json
 {
   "jwt": "eyJhbGciOiJSUzI1NiIs..."
 }
 ```
 
-Response:
+**Request Format 2: Provider + Access Token (Facebook, Twitch)**
 ```json
 {
-  "salt": "base64-encoded-salt"
+  "provider": "facebook",
+  "token": "access_token_here"
 }
 ```
+
+or
+
+```json
+{
+  "provider": "twitch",
+  "token": "access_token_here"
+}
+```
+
+**Supported Providers:**
+- `google` - **JWT format only** (`{ "jwt": "id_token" }`)
+- `apple` - **JWT format only** (`{ "jwt": "id_token" }`)
+- `facebook` - **Provider + token format** (`{ "provider": "facebook", "token": "access_token" }`)
+- `twitch` - **Provider + token format** (`{ "provider": "twitch", "token": "access_token" }`)
+
+**Important Notes:**
+- Google and Apple use JWT ID tokens and must use the `jwt` field format
+- Facebook and Twitch use OAuth access tokens and must use the `provider` + `token` format
+- Attempting to use Apple with `{ "provider": "apple", "token": "..." }` will return an error
+
+**Response:**
+```json
+{
+  "salt": "12345678901234567890123456789012"
+}
+```
+
+The salt is returned as a BigInt decimal string (for zkLogin compatibility).
 
 ### GET /health
 Health check endpoint.

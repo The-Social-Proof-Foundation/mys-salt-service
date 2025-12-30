@@ -1,4 +1,5 @@
 pub mod jwt;
+pub mod access_token;
 
 use anyhow::Result;
 use chacha20poly1305::{
@@ -110,11 +111,17 @@ pub fn generate_master_seed() -> Vec<u8> {
     seed
 }
 
-/// Hash a JWT for audit logging
-pub fn hash_jwt_for_audit(jwt: &str) -> String {
+/// Hash a token (JWT or access token) for audit logging
+pub fn hash_token_for_audit(token: &str) -> String {
     let mut hasher = <Sha256 as Digest>::new();
-    hasher.update(jwt.as_bytes());
+    hasher.update(token.as_bytes());
     general_purpose::STANDARD.encode(hasher.finalize())
+}
+
+/// Hash a JWT for audit logging (backward compatibility)
+#[deprecated(note = "Use hash_token_for_audit instead")]
+pub fn hash_jwt_for_audit(jwt: &str) -> String {
+    hash_token_for_audit(jwt)
 }
 
 #[cfg(test)]

@@ -10,6 +10,9 @@ pub struct Config {
     pub allowed_origins: Vec<String>,
     pub rate_limit_per_minute: i32,
     pub log_level: String,
+    pub twitch_client_id: Option<String>,
+    pub facebook_app_secret: Option<String>,
+    pub facebook_app_id: Option<String>,
 }
 
 impl Config {
@@ -37,6 +40,9 @@ impl Config {
                 .context("Invalid RATE_LIMIT")?,
             log_level: env::var("LOG_LEVEL")
                 .unwrap_or_else(|_| "info".to_string()),
+            twitch_client_id: env::var("TWITCH_CLIENT_ID").ok(),
+            facebook_app_secret: env::var("FACEBOOK_APP_SECRET").ok(),
+            facebook_app_id: env::var("FACEBOOK_APP_ID").ok(),
         })
     }
 

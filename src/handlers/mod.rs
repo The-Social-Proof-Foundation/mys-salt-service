@@ -9,7 +9,7 @@ use hex;
 
 use crate::{
     models::{GetSaltRequest, GetSaltResponse, HealthCheckResponse, ActionType},
-    security::{jwt::JwtValidator, hash_jwt_for_audit},
+    security::{jwt::JwtValidator, hash_token_for_audit},
     state::AppState,
 };
 
@@ -71,31 +71,80 @@ pub async fn get_salt(
         return Err((StatusCode::TOO_MANY_REQUESTS, "Rate limit exceeded".to_string()));
     }
 
-    // Validate JWT
-    let claims = match state.jwt_validator.validate(&request.jwt).await {
-        Ok(c) => c,
-        Err(e) => {
-            error!("JWT validation failed: {}", e);
-            state.metrics.increment_jwt_failed();
-            state.metrics.increment_failed();
-            
-            // Log failed attempt
-            let _ = state.store.log_audit(
-                "unknown",
-                ActionType::Error,
-                Some(ip_address),
-                user_agent,
-                Some(hash_jwt_for_audit(&request.jwt)),
-                false,
-                Some(e.to_string()),
-            ).await;
-            
-            return Err((StatusCode::UNAUTHORIZED, "Invalid JWT".to_string()));
+    // Extract claims based on request type
+    let (claims, token_hash) = if request.is_jwt() {
+        // JWT-based request (legacy or JWT providers)
+        let token = request.token();
+        match state.jwt_validator.validate(token).await {
+            Ok(c) => {
+                let hash = hash_token_for_audit(token);
+                (c, hash)
+            }
+            Err(e) => {
+                error!("JWT validation failed: {}", e);
+                state.metrics.increment_jwt_failed();
+                state.metrics.increment_failed();
+                
+                // Log failed attempt
+                let _ = state.store.log_audit(
+                    "unknown",
+                    ActionType::Error,
+                    Some(ip_address),
+                    user_agent,
+                    Some(hash_token_for_audit(token)),
+                    false,
+                    Some(e.to_string()),
+                ).await;
+                
+                return Err((StatusCode::UNAUTHORIZED, "Invalid JWT".to_string()));
+            }
+        }
+    } else {
+        // Provider + token request (Facebook/Twitch only)
+        let provider = request.provider().unwrap_or("unknown");
+        let provider_lower = provider.to_lowercase();
+        
+        // Apple only supports JWT format, not provider+token format
+        if provider_lower == "apple" {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "Apple authentication requires JWT format. Use { \"jwt\": \"...\" } instead of { \"provider\": \"apple\", \"token\": \"...\" }".to_string(),
+            ));
+        }
+        
+        let token = request.token();
+        
+        match state.access_token_validator.extract_claims_from_token(provider, token).await {
+            Ok(c) => {
+                let hash = hash_token_for_audit(token);
+                (c, hash)
+            }
+            Err(e) => {
+                error!("Access token validation failed for provider {}: {}", provider, e);
+                state.metrics.increment_jwt_failed();
+                state.metrics.increment_failed();
+                
+                // Log failed attempt
+                let _ = state.store.log_audit(
+                    "unknown",
+                    ActionType::Error,
+                    Some(ip_address),
+                    user_agent,
+                    Some(hash_token_for_audit(token)),
+                    false,
+                    Some(format!("Provider {}: {}", provider, e)),
+                ).await;
+                
+                return Err((
+                    StatusCode::UNAUTHORIZED,
+                    format!("Invalid token for provider {}", provider),
+                ));
+            }
         }
     };
 
     let user_identifier = JwtValidator::generate_user_identifier(&claims);
-    let jwt_hash = hash_jwt_for_audit(&request.jwt);
+    let token_hash = token_hash;
 
     // Log the lookup attempt for debugging
     info!(
@@ -122,7 +171,7 @@ pub async fn get_salt(
                 ActionType::Read,
                 Some(ip_address),
                 user_agent,
-                Some(jwt_hash),
+                Some(token_hash),
                 true,
                 None,
             ).await;
@@ -152,135 +201,71 @@ pub async fn get_salt(
                     (StatusCode::INTERNAL_SERVER_ERROR, "Encryption error".to_string())
                 })?;
 
-            // Try to store salt - handle race condition where another request created it first
-            match state.store.store_salt(&claims, &encrypted).await {
-                Ok(Some(stored_salt)) => {
-                    // Successfully inserted new salt
-                    // Decrypt to return the plain salt
-                    let decrypted = state
-                        .salt_manager
-                        .decrypt_salt(&stored_salt.encrypted_salt)
-                        .map_err(|e| {
-                            error!("Failed to decrypt newly stored salt: {}", e);
-                            state.metrics.increment_failed();
-                            (StatusCode::INTERNAL_SERVER_ERROR, "Decryption error".to_string())
-                        })?;
-
-                    // Verify the decrypted salt matches what we generated (consistency check)
-                    if decrypted != salt {
-                        error!(
-                            "CRITICAL: Stored salt mismatch for user {} - generated: {:?}, stored: {:?}",
-                            user_identifier,
-                            hex::encode(&salt),
-                            hex::encode(&decrypted)
-                        );
-                        state.metrics.increment_failed();
-                        return Err((
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            "Salt consistency check failed".to_string(),
-                        ));
-                    }
-
-                    // Log creation
-                    let _ = state.store.log_audit(
-                        &user_identifier,
-                        ActionType::Create,
-                        Some(ip_address),
-                        user_agent,
-                        Some(jwt_hash),
-                        true,
-                        None,
-                    ).await;
-
-                    info!("Successfully created new salt for user: {}", user_identifier);
-                    state.metrics.increment_salt_created();
-                    salt
-                }
-                Ok(None) => {
-                    // Race condition: another request created the salt first
-                    // Retrieve the existing salt
-                    warn!(
-                        "Race condition detected for user {} - salt was created by another request, retrieving existing salt",
-                        user_identifier
-                    );
-                    
-                    match state.store.get_salt(&claims).await {
-                        Ok(Some(existing)) => {
-                            // Decrypt existing salt
-                            let decrypted = state
-                                .salt_manager
-                                .decrypt_salt(&existing.encrypted_salt)
-                                .map_err(|e| {
-                                    error!("Failed to decrypt existing salt after race condition: {}", e);
-                                    state.metrics.increment_failed();
-                                    (StatusCode::INTERNAL_SERVER_ERROR, "Decryption error".to_string())
-                                })?;
-
-                            // Verify consistency - the existing salt should match what we would generate
-                            if decrypted != salt {
-                                error!(
-                                    "CRITICAL: Salt mismatch after race condition for user {} - generated: {:?}, existing: {:?}",
-                                    user_identifier,
-                                    hex::encode(&salt),
-                                    hex::encode(&decrypted)
-                                );
-                                state.metrics.increment_failed();
-                                return Err((
-                                    StatusCode::INTERNAL_SERVER_ERROR,
-                                    "Salt consistency check failed after race condition".to_string(),
-                                ));
-                            }
-
-                            // Log read action (since we're reading an existing salt)
-                            let _ = state.store.log_audit(
-                                &user_identifier,
-                                ActionType::Read,
-                                Some(ip_address),
-                                user_agent,
-                                Some(jwt_hash),
-                                true,
-                                None,
-                            ).await;
-
-                            info!(
-                                "Retrieved existing salt after race condition for user: {}",
-                                user_identifier
-                            );
-                            state.metrics.increment_salt_retrieved();
-                            decrypted
-                        }
-                        Ok(None) => {
-                            // This should never happen - we just tried to insert and got None,
-                            // but then get_salt also returns None
-                            error!(
-                                "CRITICAL: Salt disappeared for user {} - insert returned None and get_salt also returned None",
-                                user_identifier
-                            );
-                            state.metrics.increment_failed();
-                            return Err((
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                "Salt storage inconsistency detected".to_string(),
-                            ));
-                        }
-                        Err(e) => {
-                            error!("Failed to retrieve salt after race condition: {}", e);
-                            state.metrics.increment_failed();
-                            return Err((
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                "Database error".to_string(),
-                            ));
-                        }
-                    }
-                }
-                Err(e) => {
+            // Store salt - ON CONFLICT will return existing row if race condition occurred
+            let stored_salt = state.store.store_salt(&claims, &encrypted).await
+                .map_err(|e| {
                     error!("Failed to store salt: {}", e);
                     state.metrics.increment_failed();
-                    return Err((
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "Storage error".to_string(),
-                    ));
-                }
+                    (StatusCode::INTERNAL_SERVER_ERROR, "Storage error".to_string())
+                })?;
+
+            // Decrypt the stored salt (could be newly inserted or existing from race condition)
+            let decrypted = state
+                .salt_manager
+                .decrypt_salt(&stored_salt.encrypted_salt)
+                .map_err(|e| {
+                    error!("Failed to decrypt stored salt: {}", e);
+                    state.metrics.increment_failed();
+                    (StatusCode::INTERNAL_SERVER_ERROR, "Decryption error".to_string())
+                })?;
+
+            // Verify the decrypted salt matches what we generated (consistency check)
+            if decrypted != salt {
+                error!(
+                    "CRITICAL: Stored salt mismatch for user {} - generated: {:?}, stored: {:?}",
+                    user_identifier,
+                    hex::encode(&salt),
+                    hex::encode(&decrypted)
+                );
+                state.metrics.increment_failed();
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Salt consistency check failed".to_string(),
+                ));
             }
+
+            // Check if this was a new insert or existing salt by checking created_at vs updated_at
+            let is_new = stored_salt.created_at == stored_salt.updated_at;
+            
+            if is_new {
+                // Log creation
+                let _ = state.store.log_audit(
+                    &user_identifier,
+                    ActionType::Create,
+                    Some(ip_address),
+                    user_agent,
+                    Some(token_hash),
+                    true,
+                    None,
+                ).await;
+                info!("Successfully created new salt for user: {}", user_identifier);
+                state.metrics.increment_salt_created();
+            } else {
+                // Race condition: another request created it first
+                warn!("Race condition detected for user {} - salt was created by another request", user_identifier);
+                let _ = state.store.log_audit(
+                    &user_identifier,
+                    ActionType::Read,
+                    Some(ip_address),
+                    user_agent,
+                    Some(token_hash),
+                    true,
+                    None,
+                ).await;
+                state.metrics.increment_salt_retrieved();
+            }
+            
+            salt
         }
         Err(e) => {
             error!("Database error: {}", e);
@@ -357,7 +342,13 @@ pub async fn get_salt_test(
     //     .map(|s| s.to_string());
 
     // Decode the JWT without validation for testing
-    let parts: Vec<&str> = request.jwt.split('.').collect();
+    let token = match &request {
+        GetSaltRequest::Jwt { jwt } => jwt,
+        GetSaltRequest::Provider { .. } => {
+            return Err((StatusCode::BAD_REQUEST, "Test endpoint only accepts JWT format".to_string()));
+        }
+    };
+    let parts: Vec<&str> = token.split('.').collect();
     if parts.len() != 3 {
         return Err((StatusCode::BAD_REQUEST, "Invalid JWT format".to_string()));
     }
@@ -397,7 +388,6 @@ pub async fn get_salt_test(
     };
 
     let user_identifier = JwtValidator::generate_user_identifier(&claims);
-    // let jwt_hash = hash_jwt_for_audit(&request.jwt);
 
     // Generate salt (same logic as production)
     let salt = state

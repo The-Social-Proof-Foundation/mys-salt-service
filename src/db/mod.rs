@@ -27,22 +27,24 @@ impl SaltStore {
     }
 
     /// Store encrypted salt for a user
-    /// Returns the stored salt, or None if a salt already exists (to handle race conditions)
-    /// This function NEVER overwrites existing salts - salts are immutable once created
+    /// Returns the stored salt (newly inserted or existing if race condition occurred)
+    /// Uses ON CONFLICT DO UPDATE with no-op to ensure RETURNING always returns a row
     pub async fn store_salt(
         &self,
         claims: &JwtClaims,
         encrypted_salt: &[u8],
-    ) -> Result<Option<UserSalt>> {
+    ) -> Result<UserSalt> {
         let user_identifier = JwtValidator::generate_user_identifier(claims);
 
-        // Try to insert, but do nothing if salt already exists (ON CONFLICT DO NOTHING)
+        // Try to insert, but return existing row if salt already exists
         // This prevents race conditions where two requests try to create a salt simultaneously
+        // We use DO UPDATE with a no-op to ensure RETURNING always returns a row
         let result = sqlx::query_as::<_, UserSalt>(
             r#"
             INSERT INTO user_salts (user_identifier, iss, aud, sub, encrypted_salt, encryption_version)
             VALUES ($1, $2, $3, $4, $5, 1)
-            ON CONFLICT (user_identifier) DO NOTHING
+            ON CONFLICT (user_identifier) DO UPDATE
+            SET user_identifier = EXCLUDED.user_identifier
             RETURNING 
                 id, 
                 user_identifier, 
@@ -60,7 +62,7 @@ impl SaltStore {
         .bind(&claims.aud)
         .bind(&claims.sub)
         .bind(encrypted_salt)
-        .fetch_optional(&self.pool)
+        .fetch_one(&self.pool)
         .await
         .context("Failed to store salt")?;
 

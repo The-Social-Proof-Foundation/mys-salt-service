@@ -20,7 +20,7 @@ use mys_salt_service::{
     db::SaltStore,
     monitoring::Metrics,
     state::AppState,
-    security::{SaltManager, jwt::JwtValidator},
+    security::{SaltManager, jwt::JwtValidator, access_token::AccessTokenValidator},
 };
 
 #[tokio::main]
@@ -58,6 +58,11 @@ async fn main() -> Result<()> {
 
     let salt_manager = Arc::new(SaltManager::new(master_seed)?);
     let jwt_validator = Arc::new(JwtValidator::new());
+    let access_token_validator = Arc::new(AccessTokenValidator::new(
+        config.twitch_client_id.clone(),
+        config.facebook_app_secret.clone(),
+        config.facebook_app_id.clone(),
+    ));
     let metrics = Arc::new(Metrics::new());
 
     let state = AppState {
@@ -65,6 +70,7 @@ async fn main() -> Result<()> {
         store,
         salt_manager,
         jwt_validator,
+        access_token_validator,
         metrics,
     };
 

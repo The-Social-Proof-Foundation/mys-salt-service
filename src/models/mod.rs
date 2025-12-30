@@ -87,8 +87,35 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GetSaltRequest {
-    pub jwt: String,
+#[serde(untagged)]
+pub enum GetSaltRequest {
+    /// Legacy format: JWT token
+    Jwt { jwt: String },
+    /// New format: Provider + access token
+    Provider { provider: String, token: String },
+}
+
+impl GetSaltRequest {
+    /// Check if this is a JWT-based request
+    pub fn is_jwt(&self) -> bool {
+        matches!(self, Self::Jwt { .. })
+    }
+
+    /// Get the token string (works for both formats)
+    pub fn token(&self) -> &str {
+        match self {
+            Self::Jwt { jwt } => jwt,
+            Self::Provider { token, .. } => token,
+        }
+    }
+
+    /// Get the provider name if available
+    pub fn provider(&self) -> Option<&str> {
+        match self {
+            Self::Jwt { .. } => None,
+            Self::Provider { provider, .. } => Some(provider),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -155,6 +182,15 @@ impl OAuthProviderConfig {
             jwks_uri: "https://appleid.apple.com/auth/keys".to_string(),
             token_endpoint: Some("https://appleid.apple.com/auth/token".to_string()),
             userinfo_endpoint: None, // Apple doesn't provide a userinfo endpoint
+        }
+    }
+
+    pub fn twitch() -> Self {
+        Self {
+            issuer: "https://id.twitch.tv/oauth2".to_string(),
+            jwks_uri: "https://id.twitch.tv/oauth2/keys".to_string(),
+            token_endpoint: Some("https://id.twitch.tv/oauth2/token".to_string()),
+            userinfo_endpoint: Some("https://api.twitch.tv/helix/users".to_string()),
         }
     }
 } 

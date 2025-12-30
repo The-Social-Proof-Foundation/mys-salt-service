@@ -54,6 +54,10 @@ impl JwtValidator {
             "https://appleid.apple.com".to_string(),
             OAuthProviderConfig::apple(),
         );
+        providers.insert(
+            "https://id.twitch.tv/oauth2".to_string(),
+            OAuthProviderConfig::twitch(),
+        );
 
         Self {
             client: Client::builder()
