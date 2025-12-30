@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use jsonwebtoken::{
-    decode, decode_header, jwk::JwkSet, Algorithm, DecodingKey, Validation,
+    decode, decode_header, jwk::JwkSet, DecodingKey, Validation,
 };
 use reqwest::Client;
 use serde_json::Value;
@@ -47,16 +47,8 @@ impl JwtValidator {
             OAuthProviderConfig::google(),
         );
         providers.insert(
-            "https://www.facebook.com".to_string(),
-            OAuthProviderConfig::facebook(),
-        );
-        providers.insert(
             "https://appleid.apple.com".to_string(),
             OAuthProviderConfig::apple(),
-        );
-        providers.insert(
-            "https://id.twitch.tv/oauth2".to_string(),
-            OAuthProviderConfig::twitch(),
         );
 
         Self {
@@ -72,9 +64,12 @@ impl JwtValidator {
 
     /// Validate a JWT and extract claims
     pub async fn validate(&self, jwt: &str) -> Result<JwtClaims> {
-        // Decode header to get key ID
+        // Decode header to get key ID and algorithm
         let header = decode_header(jwt).context("Failed to decode JWT header")?;
         let kid = header.kid.context("JWT missing key ID")?;
+        
+        // Extract algorithm from header (RS256 for Google, ES256 for Apple)
+        let algorithm = header.alg;
 
         // Extract issuer from JWT payload using manual decoding
         let payload = self.extract_payload(jwt)
@@ -102,8 +97,8 @@ impl JwtValidator {
         let decoding_key = DecodingKey::from_jwk(jwk)
             .context("Failed to create decoding key from JWK")?;
 
-        // Set up validation
-        let mut validation = Validation::new(Algorithm::RS256);
+        // Set up validation with algorithm from JWT header
+        let mut validation = Validation::new(algorithm);
         validation.set_issuer(&[&provider.issuer]);
         validation.validate_exp = true;
         validation.validate_aud = false; // Disable audience validation - we mainly care about signature and issuer
