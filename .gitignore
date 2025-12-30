@@ -1,11 +1,22 @@
 /target
 
-# Environment variables
+# Environment variables - NEVER commit these!
 .env
+.env.*
 .env.local
-.env.*.local
 .env.production
 .env.development
 .env.test
 *.env
 .envrc
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
