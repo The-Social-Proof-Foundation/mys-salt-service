@@ -1,8 +1,8 @@
 [package]
-name = "mys-salt-service"
+name = "myso-salt-service"
 version = "0.1.0"
 edition = "2021"
-default-run = "mys-salt-service"
+default-run = "myso-salt-service"
 
 [dependencies]
 # Web framework

@@ -15,7 +15,7 @@ use tower_http::{
 use tracing::{info, error};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use mys_salt_service::{
+use myso_salt_service::{
     config::Config,
     db::SaltStore,
     monitoring::Metrics,
@@ -106,10 +106,10 @@ fn build_router(state: AppState, allowed_origins: &[String]) -> Router {
         .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]);
 
     Router::new()
-        .route("/health", get(mys_salt_service::handlers::health_check))
-        .route("/salt", post(mys_salt_service::handlers::get_salt))
-        .route("/salt/test", post(mys_salt_service::handlers::get_salt_test))
-        .route("/metrics", get(mys_salt_service::handlers::get_metrics))
+        .route("/health", get(myso_salt_service::handlers::health_check))
+        .route("/salt", post(myso_salt_service::handlers::get_salt))
+        .route("/salt/test", post(myso_salt_service::handlers::get_salt_test))
+        .route("/metrics", get(myso_salt_service::handlers::get_metrics))
         .with_state(state)
         .layer(RequestBodyLimitLayer::new(1024 * 1024)) // 1MB limit
         .layer(cors)

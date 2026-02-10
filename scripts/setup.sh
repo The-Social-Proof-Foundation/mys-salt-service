@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# MYS Salt Service Setup Script
+# MySocial Salt Service Setup Script
 
 set -e
 
-echo "🚀 MYS Salt Service Setup"
+echo "🚀 MySocial Salt Service Setup"
 echo "========================"
 
 # Check if master seed exists
@@ -49,4 +49,4 @@ echo "To start the service:"
 echo "  cargo run --release"
 echo ""
 echo "Or for production:"
-echo "  ./target/release/mys-salt-service" 
+echo "  ./target/release/myso-salt-service" 

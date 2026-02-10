@@ -45,7 +45,7 @@ This service provides secure salt generation and storage for zkLogin authenticat
 
 1. **Clone the repository**
    ```bash
-   cd mys-salt-service
+   cd myso-salt-service
    ```
 
 2. **Generate a master seed**

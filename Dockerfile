@@ -26,7 +26,7 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Copy the built binary
-COPY --from=builder /app/target/release/mys-salt-service /app/
+COPY --from=builder /app/target/release/myso-salt-service /app/
 COPY --from=builder /app/migrations /app/migrations
 
 # Create non-root user
@@ -41,4 +41,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:3000/health || exit 1
 
 # Run the binary
-CMD ["./mys-salt-service"] 
+CMD ["./myso-salt-service"] 

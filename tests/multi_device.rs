@@ -1,6 +1,6 @@
-use mys_salt_service::security::{generate_master_seed, SaltManager};
-use mys_salt_service::security::jwt::JwtValidator;
-use mys_salt_service::models::JwtClaims;
+use myso_salt_service::security::{generate_master_seed, SaltManager};
+use myso_salt_service::security::jwt::JwtValidator;
+use myso_salt_service::models::JwtClaims;
 
 #[test]
 fn user_identifier_unified_across_audiences() {
