@@ -102,7 +102,18 @@ PORT=3000
 ALLOWED_ORIGINS=https://wallet.mysocial.network
 RATE_LIMIT=60
 LOG_LEVEL=info
+
+# Required for JWT validation (Google, Apple). Use same client ID for web+iOS.
+ALLOWED_AUDIENCE_GOOGLE=<your-google-client-id>.apps.googleusercontent.com
+ALLOWED_AUDIENCE_APPLE=<your-apple-service-id>
+
+# Required when using Facebook/Twitch access-token flow
+ALLOWED_AUDIENCE_FACEBOOK=<canonical-facebook-aud>
+ALLOWED_AUDIENCE_TWITCH=<canonical-twitch-aud>
+
 TWITCH_CLIENT_ID=<your-twitch-client-id>  # Required for Twitch authentication
+FACEBOOK_APP_ID=<your-facebook-app-id>    # Required for Facebook authentication
+FACEBOOK_APP_SECRET=<your-facebook-app-secret>
 ```
 
 ### 4. Deploy

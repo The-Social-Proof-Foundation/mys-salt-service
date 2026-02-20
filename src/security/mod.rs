@@ -43,15 +43,16 @@ impl SaltManager {
     /// Generate a deterministic salt from JWT claims
     /// Returns exactly 16 bytes (128 bits) for zkLogin compatibility
     ///
-    /// Important: Use only the stable user identifier (`sub`) and the server's
-    /// master seed to avoid variability across platforms (e.g., differing
-    /// `aud`, `iat`, `nonce`).
+    /// Uses iss + sub (stable per provider) to align with DB key and avoid
+    /// cross-provider sub collisions. aud is not included since we enforce
+    /// a single aud per provider; differing aud is rejected earlier in the flow.
     pub fn generate_salt(&self, claims: &JwtClaims) -> Result<Vec<u8>> {
         let mut hasher = <Sha256 as Digest>::new();
 
         // Domain separation for versioning and server binding
         hasher.update(b"MYSOCIAL_SALT_V1");
         hasher.update(&self.master_seed);
+        hasher.update(claims.iss.as_bytes());
         hasher.update(claims.sub.as_bytes());
 
         let hash = hasher.finalize();
@@ -205,6 +206,48 @@ mod tests {
         let salt_web = manager.generate_salt(&claims_web).unwrap();
         let salt_ios = manager.generate_salt(&claims_ios).unwrap();
 
-        assert_eq!(salt_web, salt_ios, "Salts must match across platforms for same user sub");
+        assert_eq!(salt_web, salt_ios, "Salts must match across platforms for same iss+sub (aud must match configured one in production)");
+    }
+
+    #[test]
+    fn test_salt_differs_across_issuers() {
+        let seed = generate_master_seed();
+        let manager = SaltManager::new(seed).unwrap();
+
+        // Same sub, different issuers - must produce different salts
+        let claims_google = JwtClaims {
+            iss: "https://accounts.google.com".to_string(),
+            aud: "test-app".to_string(),
+            sub: "12345".to_string(),
+            exp: 1234567890,
+            iat: 1234567890,
+            nonce: None,
+            email: None,
+            email_verified: None,
+            name: None,
+            picture: None,
+            given_name: None,
+            family_name: None,
+        };
+
+        let claims_facebook = JwtClaims {
+            iss: "https://www.facebook.com".to_string(),
+            aud: "test-app".to_string(),
+            sub: "12345".to_string(),
+            exp: 1234567890,
+            iat: 1234567890,
+            nonce: None,
+            email: None,
+            email_verified: None,
+            name: None,
+            picture: None,
+            given_name: None,
+            family_name: None,
+        };
+
+        let salt_google = manager.generate_salt(&claims_google).unwrap();
+        let salt_facebook = manager.generate_salt(&claims_facebook).unwrap();
+
+        assert_ne!(salt_google, salt_facebook, "Salts must differ when iss differs (same sub)");
     }
 }

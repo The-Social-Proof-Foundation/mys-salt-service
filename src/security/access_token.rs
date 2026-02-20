@@ -51,6 +51,8 @@ pub struct AccessTokenValidator {
     twitch_client_id: Option<String>,
     facebook_app_secret: Option<String>,
     facebook_app_id: Option<String>,
+    allowed_audience_facebook: Option<String>,
+    allowed_audience_twitch: Option<String>,
 }
 
 impl AccessTokenValidator {
@@ -58,6 +60,8 @@ impl AccessTokenValidator {
         twitch_client_id: Option<String>,
         facebook_app_secret: Option<String>,
         facebook_app_id: Option<String>,
+        allowed_audience_facebook: Option<String>,
+        allowed_audience_twitch: Option<String>,
     ) -> Self {
         Self {
             client: Client::builder()
@@ -67,6 +71,8 @@ impl AccessTokenValidator {
             twitch_client_id,
             facebook_app_secret,
             facebook_app_id,
+            allowed_audience_facebook,
+            allowed_audience_twitch,
         }
     }
 
@@ -273,10 +279,14 @@ impl AccessTokenValidator {
             "facebook" => {
                 let user_info = self.validate_facebook_token(token).await?;
                 let config = OAuthProviderConfig::facebook();
+                let aud = self.allowed_audience_facebook
+                    .as_ref()
+                    .context("ALLOWED_AUDIENCE_FACEBOOK required for Facebook")?
+                    .clone();
 
                 Ok(JwtClaims {
                     iss: config.issuer,
-                    aud: "facebook-client".to_string(), // Could be made configurable
+                    aud,
                     sub: user_info.id,
                     exp: now + 3600, // 1 hour expiry
                     iat: now,
@@ -292,10 +302,14 @@ impl AccessTokenValidator {
             "twitch" => {
                 let user_info = self.validate_twitch_token(token).await?;
                 let config = OAuthProviderConfig::twitch();
+                let aud = self.allowed_audience_twitch
+                    .as_ref()
+                    .context("ALLOWED_AUDIENCE_TWITCH required for Twitch")?
+                    .clone();
 
                 Ok(JwtClaims {
                     iss: config.issuer,
-                    aud: "twitch-client".to_string(), // Could be made configurable
+                    aud,
                     sub: user_info.id,
                     exp: now + 3600, // 1 hour expiry
                     iat: now,
@@ -315,7 +329,7 @@ impl AccessTokenValidator {
 
 impl Default for AccessTokenValidator {
     fn default() -> Self {
-        Self::new(None, None, None)
+        Self::new(None, None, None, None, None)
     }
 }
 

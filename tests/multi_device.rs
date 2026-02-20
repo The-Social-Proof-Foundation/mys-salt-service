@@ -79,4 +79,4 @@ fn salts_match_for_same_user_across_devices() {
     assert_eq!(salt_web, salt_ios, "Salts must match across devices for the same user");
 }
 
-// Intentionally no cross-issuer difference check: current design derives salts from `sub` only.
+// Salt derivation uses iss+sub; same iss+sub yields same salt across platforms.

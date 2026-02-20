@@ -15,6 +15,8 @@ pub struct JwtValidator {
     providers: HashMap<String, OAuthProviderConfig>,
     jwks_cache: Arc<RwLock<HashMap<String, (JwkSet, std::time::Instant)>>>,
     cache_duration: Duration,
+    allowed_audience_google: Option<String>,
+    allowed_audience_apple: Option<String>,
 }
 
 impl JwtValidator {
@@ -40,7 +42,10 @@ impl JwtValidator {
         Ok(payload)
     }
 
-    pub fn new() -> Self {
+    pub fn new(
+        allowed_audience_google: Option<String>,
+        allowed_audience_apple: Option<String>,
+    ) -> Self {
         let mut providers = HashMap::new();
         providers.insert(
             "https://accounts.google.com".to_string(),
@@ -59,7 +64,28 @@ impl JwtValidator {
             providers,
             jwks_cache: Arc::new(RwLock::new(HashMap::new())),
             cache_duration: Duration::from_secs(3600), // 1 hour cache
+            allowed_audience_google,
+            allowed_audience_apple,
         }
+    }
+
+    /// Validate that claims.aud matches the configured allowed audience for the issuer.
+    fn validate_audience(&self, claims: &JwtClaims) -> Result<()> {
+        let allowed = match claims.iss.as_str() {
+            "https://accounts.google.com" => self.allowed_audience_google.as_ref(),
+            "https://appleid.apple.com" => self.allowed_audience_apple.as_ref(),
+            _ => None,
+        };
+        let allowed = allowed
+            .context("No allowed audience configured for this provider")?;
+        if claims.aud != *allowed {
+            anyhow::bail!(
+                "Audience mismatch: expected {} for this provider, got {}",
+                allowed,
+                claims.aud
+            );
+        }
+        Ok(())
     }
 
     /// Validate a JWT and extract claims
@@ -106,6 +132,9 @@ impl JwtValidator {
         // Decode and validate
         let token_data = decode::<JwtClaims>(jwt, &decoding_key, &validation)
             .context("JWT validation failed")?;
+
+        // Validate audience matches configured allowed value for this provider
+        self.validate_audience(&token_data.claims)?;
 
         Ok(token_data.claims)
     }
@@ -178,5 +207,57 @@ mod tests {
 
         let identifier = JwtValidator::generate_user_identifier(&claims);
         assert_eq!(identifier, "https://accounts.google.com:111631294628286022835");
+    }
+
+    #[test]
+    fn test_validate_audience_rejects_wrong_aud() {
+        let validator = JwtValidator::new(
+            Some("expected-google-aud".to_string()),
+            Some("expected-apple-aud".to_string()),
+        );
+
+        let claims_wrong_aud = JwtClaims {
+            iss: "https://accounts.google.com".to_string(),
+            aud: "wrong-aud".to_string(),
+            sub: "123".to_string(),
+            exp: 1234567890,
+            iat: 1234567890,
+            nonce: None,
+            email: None,
+            email_verified: None,
+            name: None,
+            picture: None,
+            given_name: None,
+            family_name: None,
+        };
+
+        let result = validator.validate_audience(&claims_wrong_aud);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Audience mismatch"));
+    }
+
+    #[test]
+    fn test_validate_audience_accepts_correct_aud() {
+        let validator = JwtValidator::new(
+            Some("expected-google-aud".to_string()),
+            Some("expected-apple-aud".to_string()),
+        );
+
+        let claims = JwtClaims {
+            iss: "https://accounts.google.com".to_string(),
+            aud: "expected-google-aud".to_string(),
+            sub: "123".to_string(),
+            exp: 1234567890,
+            iat: 1234567890,
+            nonce: None,
+            email: None,
+            email_verified: None,
+            name: None,
+            picture: None,
+            given_name: None,
+            family_name: None,
+        };
+
+        assert!(validator.validate_audience(&claims).is_ok());
     }
 } 

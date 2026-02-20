@@ -57,11 +57,16 @@ async fn main() -> Result<()> {
     info!("Database migrations completed");
 
     let salt_manager = Arc::new(SaltManager::new(master_seed)?);
-    let jwt_validator = Arc::new(JwtValidator::new());
+    let jwt_validator = Arc::new(JwtValidator::new(
+        config.allowed_audience_google.clone(),
+        config.allowed_audience_apple.clone(),
+    ));
     let access_token_validator = Arc::new(AccessTokenValidator::new(
         config.twitch_client_id.clone(),
         config.facebook_app_secret.clone(),
         config.facebook_app_id.clone(),
+        config.allowed_audience_facebook.clone(),
+        config.allowed_audience_twitch.clone(),
     ));
     let metrics = Arc::new(Metrics::new());
 
