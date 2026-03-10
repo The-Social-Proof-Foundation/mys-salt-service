@@ -148,8 +148,9 @@ pub struct AuthExchangeResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthCallbackResponse {
     pub code: String,
-    pub user: Option<serde_json::Value>,
     pub salt: String,
+    pub id_token: Option<String>,
+    pub user: Option<serde_json::Value>,
     pub access_token: Option<String>,
 }
 

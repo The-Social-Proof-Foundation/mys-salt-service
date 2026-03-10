@@ -581,8 +581,9 @@ pub async fn auth_provider_callback(
 
     Ok(Json(AuthCallbackResponse {
         code,
-        user: tokens.user,
         salt: salt_to_bigint_string(&salt),
+        id_token: tokens.id_token.clone(),
+        user: tokens.user,
         access_token: tokens.access_token,
     }))
 }
