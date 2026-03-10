@@ -122,7 +122,7 @@ fn build_router(state: AppState, allowed_origins: &[String]) -> Router {
         .route("/salt/test", post(myso_salt_service::handlers::get_salt_test))
         .route("/metrics", get(myso_salt_service::handlers::get_metrics));
 
-    if state.config.auth_api_base_url.is_some() {
+    if !state.config.allowed_clients.is_empty() {
         router = router.route(
             "/auth/provider/callback",
             post(myso_salt_service::handlers::auth_provider_callback),

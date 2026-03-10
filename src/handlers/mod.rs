@@ -8,13 +8,69 @@ use tracing::{error, info, warn};
 use hex;
 
 use crate::{
+    auth::exchange,
     models::{
         GetSaltRequest, GetSaltResponse, HealthCheckResponse, ActionType,
-        AuthCallbackRequest, AuthCallbackResponse, AuthExchangeResponse,
+        AuthCallbackRequest, AuthCallbackResponse,
     },
     security::{jwt::JwtValidator, hash_token_for_audit},
     state::AppState,
 };
+
+/// Resolve provider from request or infer from client_id.
+fn resolve_provider(request: &AuthCallbackRequest, config: &crate::config::Config) -> Result<String, String> {
+    if let Some(ref p) = request.provider {
+        let s = p.trim().to_lowercase();
+        if !s.is_empty() {
+            return Ok(s);
+        }
+    }
+    let cid = request.client_id.trim();
+    if config.allowed_audience_google.as_deref().map(|a| a == cid).unwrap_or(false) {
+        return Ok("google".to_string());
+    }
+    if config.allowed_audience_apple.as_deref().map(|a| a == cid).unwrap_or(false) {
+        return Ok("apple".to_string());
+    }
+    if config.allowed_audience_facebook.as_deref().map(|a| a == cid).unwrap_or(false) {
+        return Ok("facebook".to_string());
+    }
+    if config.allowed_audience_twitch.as_deref().map(|a| a == cid).unwrap_or(false) {
+        return Ok("twitch".to_string());
+    }
+    Err("Could not determine provider. Set provider in request or use client_id that matches an ALLOWED_AUDIENCE_* value.".to_string())
+}
+
+/// Get the OAuth client_id to use for token exchange. The auth frontend uses the provider's
+/// client ID (from env) for the OAuth request; we must use the same for the token exchange.
+fn get_oauth_client_id_for_provider(
+    provider: &str,
+    _request_client_id: &str,
+    config: &crate::config::Config,
+) -> Result<String, String> {
+    let provider_lower = provider.to_lowercase();
+    match provider_lower.as_str() {
+        "google" => config
+            .allowed_audience_google
+            .clone()
+            .ok_or_else(|| "ALLOWED_AUDIENCE_GOOGLE not configured".to_string()),
+        "apple" => config
+            .allowed_audience_apple
+            .clone()
+            .ok_or_else(|| "ALLOWED_AUDIENCE_APPLE not configured".to_string()),
+        "facebook" => config
+            .allowed_audience_facebook
+            .clone()
+            .or_else(|| config.facebook_app_id.clone())
+            .ok_or_else(|| "ALLOWED_AUDIENCE_FACEBOOK or FACEBOOK_APP_ID not configured".to_string()),
+        "twitch" => config
+            .allowed_audience_twitch
+            .clone()
+            .or_else(|| config.twitch_client_id.clone())
+            .ok_or_else(|| "ALLOWED_AUDIENCE_TWITCH or TWITCH_CLIENT_ID not configured".to_string()),
+        _ => Err(format!("Unknown provider: {}", provider)),
+    }
+}
 
 /// Convert salt bytes to BigInt string for zkLogin compatibility
 /// Converts exactly 16 bytes to a BigInt decimal string following zkLogin standards
@@ -357,15 +413,6 @@ pub async fn auth_provider_callback(
         return Err((StatusCode::TOO_MANY_REQUESTS, "Rate limit exceeded".to_string()));
     }
 
-    let auth_base = state
-        .config
-        .auth_api_base_url
-        .as_ref()
-        .ok_or((
-            StatusCode::NOT_FOUND,
-            "Auth callback not configured".to_string(),
-        ))?;
-
     let client = state
         .config
         .allowed_clients
@@ -376,56 +423,25 @@ pub async fn auth_provider_callback(
             "Unknown client".to_string(),
         ))?;
 
-    let client_secret = state
-        .config
-        .auth_client_secret
-        .as_deref()
-        .unwrap_or("");
+    let provider = resolve_provider(&request, &state.config)
+        .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
 
-    let exchange_url = format!("{}/auth/exchange", auth_base.trim_end_matches('/'));
+    let oauth_client_id = get_oauth_client_id_for_provider(&provider, &request.client_id, &state.config)
+        .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
 
-    let mut body = serde_json::json!({
-        "code": request.code,
-        "redirect_uri": client.redirect_uri,
-        "client_id": request.client_id,
-        "client_secret": client_secret,
-    });
-    if let Some(ref s) = request.state {
-        body["state"] = serde_json::Value::String(s.clone());
-    }
-    if let Some(ref n) = request.nonce {
-        body["nonce"] = serde_json::Value::String(n.clone());
-    }
-    if let Some(ref cv) = request.code_verifier {
-        body["code_verifier"] = serde_json::Value::String(cv.clone());
-    }
-
-    let exchange_resp = state.http_client
-        .post(&exchange_url)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| {
-            error!("Auth exchange request failed: {}", e);
-            (StatusCode::BAD_GATEWAY, format!("Auth exchange failed: {}", e))
-        })?;
-
-    if !exchange_resp.status().is_success() {
-        let status = exchange_resp.status();
-        let err_text = exchange_resp.text().await.unwrap_or_default();
-        error!("Auth exchange failed: {} - {}", status, err_text);
-        return Err((
-            StatusCode::BAD_GATEWAY,
-            format!("Auth exchange failed: {}", err_text),
-        ));
-    }
-
-    let tokens: AuthExchangeResponse = exchange_resp.json().await.map_err(|e| {
-        error!("Failed to parse auth exchange response: {}", e);
-        (
-            StatusCode::BAD_GATEWAY,
-            format!("Invalid auth response: {}", e),
-        )
+    let tokens = exchange::exchange_code_for_tokens(
+        &state.http_client,
+        &provider,
+        &request.code,
+        &client.redirect_uri,
+        &oauth_client_id,
+        request.code_verifier.as_deref(),
+        &state.config,
+    )
+    .await
+    .map_err(|e| {
+        error!("Token exchange failed: {}", e);
+        (StatusCode::BAD_GATEWAY, format!("Auth exchange failed: {}", e))
     })?;
 
     let (claims, token_hash) = if let Some(ref id_token) = tokens.id_token {
@@ -548,7 +564,14 @@ pub async fn auth_provider_callback(
         None,
     ).await;
 
+    let code = tokens
+        .id_token
+        .clone()
+        .or(tokens.access_token.clone())
+        .unwrap_or_default();
+
     Ok(Json(AuthCallbackResponse {
+        code,
         user: tokens.user,
         salt: salt_to_bigint_string(&salt),
         access_token: tokens.access_token,

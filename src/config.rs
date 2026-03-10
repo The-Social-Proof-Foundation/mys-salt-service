@@ -17,19 +17,26 @@ pub struct Config {
     pub rate_limit_per_minute: i32,
     pub log_level: String,
     pub twitch_client_id: Option<String>,
+    pub twitch_client_secret: Option<String>,
     pub facebook_app_secret: Option<String>,
     pub facebook_app_id: Option<String>,
     /// Canonical aud for Google JWT validation. Web and iOS must use same client ID.
     pub allowed_audience_google: Option<String>,
+    /// Google client secret for token exchange.
+    pub google_client_secret: Option<String>,
     /// Canonical aud for Apple JWT validation. Web and iOS must use same client ID.
     pub allowed_audience_apple: Option<String>,
+    /// Apple Team ID for JWT client assertion.
+    pub apple_team_id: Option<String>,
+    /// Apple Key Identifier for JWT client assertion.
+    pub apple_key_identifier: Option<String>,
+    /// Apple private key (PEM) for JWT client assertion.
+    pub apple_private_key: Option<String>,
     /// Canonical aud for Facebook access-token flow.
     pub allowed_audience_facebook: Option<String>,
     /// Canonical aud for Twitch access-token flow.
     pub allowed_audience_twitch: Option<String>,
-    pub auth_api_base_url: Option<String>,
     pub allowed_clients: Vec<AllowedClient>,
-    pub auth_client_secret: Option<String>,
 }
 
 impl Config {
@@ -58,15 +65,18 @@ impl Config {
             log_level: env::var("LOG_LEVEL")
                 .unwrap_or_else(|_| "info".to_string()),
             twitch_client_id: env::var("TWITCH_CLIENT_ID").ok(),
+            twitch_client_secret: env::var("TWITCH_CLIENT_SECRET").ok(),
             facebook_app_secret: env::var("FACEBOOK_APP_SECRET").ok(),
             facebook_app_id: env::var("FACEBOOK_APP_ID").ok(),
             allowed_audience_google: env::var("ALLOWED_AUDIENCE_GOOGLE").ok(),
+            google_client_secret: env::var("GOOGLE_CLIENT_SECRET").ok(),
             allowed_audience_apple: env::var("ALLOWED_AUDIENCE_APPLE").ok(),
+            apple_team_id: env::var("APPLE_TEAM_ID").ok(),
+            apple_key_identifier: env::var("APPLE_KEY_IDENTIFIER").ok(),
+            apple_private_key: env::var("APPLE_PRIVATE_KEY").ok(),
             allowed_audience_facebook: env::var("ALLOWED_AUDIENCE_FACEBOOK").ok(),
             allowed_audience_twitch: env::var("ALLOWED_AUDIENCE_TWITCH").ok(),
-            auth_api_base_url: env::var("AUTH_API_BASE_URL").ok(),
-            allowed_clients: parse_allowed_clients().unwrap_or_default(),
-            auth_client_secret: env::var("AUTH_CLIENT_SECRET").ok(),
+            allowed_clients: parse_allowed_clients_for_auth()?,
         })
     }
 
@@ -103,19 +113,16 @@ impl Config {
             anyhow::bail!("ALLOWED_AUDIENCE_TWITCH must be set when TWITCH_CLIENT_ID is configured");
         }
 
-        if self.auth_api_base_url.is_some() && self.allowed_clients.is_empty() {
-            anyhow::bail!("ALLOWED_CLIENTS must be non-empty when AUTH_API_BASE_URL is configured");
-        }
-
         Ok(())
     }
 }
 
-fn parse_allowed_clients() -> Result<Vec<AllowedClient>> {
+fn parse_allowed_clients_for_auth() -> Result<Vec<AllowedClient>> {
     let s = env::var("ALLOWED_CLIENTS").ok();
     let s = match s {
         Some(s) if !s.trim().is_empty() => s,
         _ => return Ok(Vec::new()),
     };
-    serde_json::from_str(&s).context("Invalid ALLOWED_CLIENTS JSON")
+    let clients: Vec<AllowedClient> = serde_json::from_str(&s).context("Invalid ALLOWED_CLIENTS JSON")?;
+    Ok(clients)
 }

@@ -127,6 +127,8 @@ pub struct GetSaltResponse {
 pub struct AuthCallbackRequest {
     pub client_id: String,
     pub code: String,
+    #[serde(default)]
+    pub provider: Option<String>,
     pub state: Option<String>,
     pub nonce: Option<String>,
     #[serde(rename = "code_verifier")]
@@ -145,6 +147,7 @@ pub struct AuthExchangeResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthCallbackResponse {
+    pub code: String,
     pub user: Option<serde_json::Value>,
     pub salt: String,
     pub access_token: Option<String>,
