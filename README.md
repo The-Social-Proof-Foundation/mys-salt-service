@@ -117,6 +117,8 @@ FACEBOOK_APP_SECRET=<your-facebook-app-secret>
 
 # Auth callback (POST /auth/provider/callback). Enabled when ALLOWED_CLIENTS is non-empty.
 ALLOWED_CLIENTS='[{"client_id":"mysocial-auth-client-id","redirect_uri":"http://localhost:3000/callback"}]'
+# Auth frontend OAuth callback URL (must match auth frontend and Google Console)
+AUTH_CALLBACK_URL=https://auth.testnet.mysocial.network/callback
 
 # Provider credentials for token exchange (in-band; no external auth API)
 GOOGLE_CLIENT_SECRET=<your-google-client-secret>
@@ -137,7 +139,7 @@ railway up
 Validates the salt service is ready (DB connectivity, salt derivation). Returns `{ "status": "ready", "salt_endpoint": "/salt" }`.
 
 ### POST /auth/provider/callback
-OAuth callback endpoint. Receives `{ client_id, code, provider?, state?, nonce?, code_verifier? }`. Looks up `client_id` in ALLOWED_CLIENTS for redirect_uri. Exchanges code for tokens in-band (Google, Apple, Facebook, Twitch), fetches salt, returns `{ code, user?, salt, access_token? }`. Enabled when `ALLOWED_CLIENTS` is non-empty.
+OAuth callback endpoint. Receives `{ client_id, code, provider?, state?, nonce?, code_verifier? }`. Looks up `client_id` in ALLOWED_CLIENTS. Uses AUTH_CALLBACK_URL for token exchange (auth frontend OAuth callback). Exchanges code for tokens in-band (Google, Apple, Facebook, Twitch), fetches salt, returns `{ code, user?, salt, access_token? }`. Enabled when `ALLOWED_CLIENTS` is non-empty.
 
 ### POST /salt
 Get or create salt for a user.

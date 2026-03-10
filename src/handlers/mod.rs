@@ -413,7 +413,7 @@ pub async fn auth_provider_callback(
         return Err((StatusCode::TOO_MANY_REQUESTS, "Rate limit exceeded".to_string()));
     }
 
-    let client = state
+    let _client = state
         .config
         .allowed_clients
         .iter()
@@ -429,11 +429,20 @@ pub async fn auth_provider_callback(
     let oauth_client_id = get_oauth_client_id_for_provider(&provider, &request.client_id, &state.config)
         .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
 
+    let oauth_redirect_uri = state
+        .config
+        .auth_callback_url
+        .as_deref()
+        .ok_or((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "AUTH_CALLBACK_URL not configured".to_string(),
+        ))?;
+
     let tokens = exchange::exchange_code_for_tokens(
         &state.http_client,
         &provider,
         &request.code,
-        &client.redirect_uri,
+        oauth_redirect_uri,
         &oauth_client_id,
         request.code_verifier.as_deref(),
         &state.config,

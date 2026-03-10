@@ -36,6 +36,8 @@ pub struct Config {
     pub allowed_audience_facebook: Option<String>,
     /// Canonical aud for Twitch access-token flow.
     pub allowed_audience_twitch: Option<String>,
+    /// Auth frontend OAuth callback URL (where Google/Apple redirect after login). Used for token exchange.
+    pub auth_callback_url: Option<String>,
     pub allowed_clients: Vec<AllowedClient>,
 }
 
@@ -76,6 +78,7 @@ impl Config {
             apple_private_key: env::var("APPLE_PRIVATE_KEY").ok(),
             allowed_audience_facebook: env::var("ALLOWED_AUDIENCE_FACEBOOK").ok(),
             allowed_audience_twitch: env::var("ALLOWED_AUDIENCE_TWITCH").ok(),
+            auth_callback_url: env::var("AUTH_CALLBACK_URL").ok(),
             allowed_clients: parse_allowed_clients_for_auth()?,
         })
     }
@@ -111,6 +114,10 @@ impl Config {
         }
         if self.twitch_client_id.is_some() && (self.allowed_audience_twitch.is_none() || self.allowed_audience_twitch.as_ref().map(|s| s.is_empty()).unwrap_or(true)) {
             anyhow::bail!("ALLOWED_AUDIENCE_TWITCH must be set when TWITCH_CLIENT_ID is configured");
+        }
+
+        if !self.allowed_clients.is_empty() && (self.auth_callback_url.is_none() || self.auth_callback_url.as_ref().map(|s| s.trim().is_empty()).unwrap_or(true)) {
+            anyhow::bail!("AUTH_CALLBACK_URL must be set when ALLOWED_CLIENTS is non-empty. Set to auth frontend OAuth callback (e.g. https://auth.testnet.mysocial.network/callback)");
         }
 
         Ok(())
