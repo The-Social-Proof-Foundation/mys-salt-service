@@ -69,6 +69,10 @@ async fn main() -> Result<()> {
         config.allowed_audience_twitch.clone(),
     ));
     let metrics = Arc::new(Metrics::new());
+    let http_client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .context("Failed to build HTTP client")?;
 
     let state = AppState {
         config: config.clone(),
@@ -77,6 +81,7 @@ async fn main() -> Result<()> {
         jwt_validator,
         access_token_validator,
         metrics,
+        http_client,
     };
 
     // Build router
@@ -110,11 +115,21 @@ fn build_router(state: AppState, allowed_origins: &[String]) -> Router {
         .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
         .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]);
 
-    Router::new()
+    let mut router = Router::new()
         .route("/health", get(myso_salt_service::handlers::health_check))
         .route("/salt", post(myso_salt_service::handlers::get_salt))
+        .route("/salt/check", get(myso_salt_service::handlers::salt_check))
         .route("/salt/test", post(myso_salt_service::handlers::get_salt_test))
-        .route("/metrics", get(myso_salt_service::handlers::get_metrics))
+        .route("/metrics", get(myso_salt_service::handlers::get_metrics));
+
+    if state.config.auth_api_base_url.is_some() {
+        router = router.route(
+            "/auth/provider/callback",
+            post(myso_salt_service::handlers::auth_provider_callback),
+        );
+    }
+
+    router
         .with_state(state)
         .layer(RequestBodyLimitLayer::new(1024 * 1024)) // 1MB limit
         .layer(cors)

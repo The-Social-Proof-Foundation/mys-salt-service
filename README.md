@@ -114,6 +114,11 @@ ALLOWED_AUDIENCE_TWITCH=<canonical-twitch-aud>
 TWITCH_CLIENT_ID=<your-twitch-client-id>  # Required for Twitch authentication
 FACEBOOK_APP_ID=<your-facebook-app-id>    # Required for Facebook authentication
 FACEBOOK_APP_SECRET=<your-facebook-app-secret>
+
+# Optional: Auth callback (POST /auth/provider/callback). Multi-platform.
+AUTH_API_BASE_URL=https://api.testnet.mysocial.network
+ALLOWED_CLIENTS='[{"client_id":"mysocial-auth-client-id","redirect_uri":"http://localhost:3000/callback"}]'
+AUTH_CLIENT_SECRET=<shared-secret-for-auth-exchange>
 ```
 
 ### 4. Deploy
@@ -123,6 +128,12 @@ railway up
 ```
 
 ## API Endpoints
+
+### GET /salt/check
+Validates the salt service is ready (DB connectivity, salt derivation). Returns `{ "status": "ready", "salt_endpoint": "/salt" }`.
+
+### POST /auth/provider/callback
+OAuth callback endpoint. Receives `{ client_id, code, state?, nonce?, code_verifier? }`. Looks up `client_id` in ALLOWED_CLIENTS for redirect_uri, uses ALLOWED_CLIENT_SECRETS for client_secret. Exchanges code for tokens, fetches salt, returns `{ user, salt, access_token? }`. Enabled when `AUTH_API_BASE_URL` is set.
 
 ### POST /salt
 Get or create salt for a user.

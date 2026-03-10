@@ -8,7 +8,10 @@ use tracing::{error, info, warn};
 use hex;
 
 use crate::{
-    models::{GetSaltRequest, GetSaltResponse, HealthCheckResponse, ActionType},
+    models::{
+        GetSaltRequest, GetSaltResponse, HealthCheckResponse, ActionType,
+        AuthCallbackRequest, AuthCallbackResponse, AuthExchangeResponse,
+    },
     security::{jwt::JwtValidator, hash_token_for_audit},
     state::AppState,
 };
@@ -314,6 +317,243 @@ pub async fn health_check(
 //         }
 //     }
 // }
+
+pub async fn salt_check(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    match sqlx::query("SELECT 1 as check")
+        .fetch_one(state.store.pool())
+        .await
+    {
+        Ok(_) => Ok(Json(serde_json::json!({
+            "status": "ready",
+            "salt_endpoint": "/salt",
+            "version": env!("CARGO_PKG_VERSION")
+        }))),
+        Err(e) => {
+            error!("Salt check failed: {}", e);
+            Err(StatusCode::SERVICE_UNAVAILABLE)
+        }
+    }
+}
+
+pub async fn auth_provider_callback(
+    State(state): State<AppState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    Json(request): Json<AuthCallbackRequest>,
+) -> Result<Json<AuthCallbackResponse>, (StatusCode, String)> {
+    let ip_address = addr.ip().to_string();
+    let rate_limit_ok = state
+        .store
+        .check_rate_limit(&ip_address, 1, state.config.rate_limit_per_minute)
+        .await
+        .map_err(|e| {
+            error!("Rate limit check failed: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, "Internal error".to_string())
+        })?;
+    if !rate_limit_ok {
+        warn!("Rate limit exceeded for IP: {}", ip_address);
+        state.metrics.increment_rate_limit();
+        return Err((StatusCode::TOO_MANY_REQUESTS, "Rate limit exceeded".to_string()));
+    }
+
+    let auth_base = state
+        .config
+        .auth_api_base_url
+        .as_ref()
+        .ok_or((
+            StatusCode::NOT_FOUND,
+            "Auth callback not configured".to_string(),
+        ))?;
+
+    let client = state
+        .config
+        .allowed_clients
+        .iter()
+        .find(|c| c.client_id == request.client_id)
+        .ok_or((
+            StatusCode::BAD_REQUEST,
+            "Unknown client".to_string(),
+        ))?;
+
+    let client_secret = state
+        .config
+        .auth_client_secret
+        .as_deref()
+        .unwrap_or("");
+
+    let exchange_url = format!("{}/auth/exchange", auth_base.trim_end_matches('/'));
+
+    let mut body = serde_json::json!({
+        "code": request.code,
+        "redirect_uri": client.redirect_uri,
+        "client_id": request.client_id,
+        "client_secret": client_secret,
+    });
+    if let Some(ref s) = request.state {
+        body["state"] = serde_json::Value::String(s.clone());
+    }
+    if let Some(ref n) = request.nonce {
+        body["nonce"] = serde_json::Value::String(n.clone());
+    }
+    if let Some(ref cv) = request.code_verifier {
+        body["code_verifier"] = serde_json::Value::String(cv.clone());
+    }
+
+    let exchange_resp = state.http_client
+        .post(&exchange_url)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| {
+            error!("Auth exchange request failed: {}", e);
+            (StatusCode::BAD_GATEWAY, format!("Auth exchange failed: {}", e))
+        })?;
+
+    if !exchange_resp.status().is_success() {
+        let status = exchange_resp.status();
+        let err_text = exchange_resp.text().await.unwrap_or_default();
+        error!("Auth exchange failed: {} - {}", status, err_text);
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            format!("Auth exchange failed: {}", err_text),
+        ));
+    }
+
+    let tokens: AuthExchangeResponse = exchange_resp.json().await.map_err(|e| {
+        error!("Failed to parse auth exchange response: {}", e);
+        (
+            StatusCode::BAD_GATEWAY,
+            format!("Invalid auth response: {}", e),
+        )
+    })?;
+
+    let (claims, token_hash) = if let Some(ref id_token) = tokens.id_token {
+        match state.jwt_validator.validate(id_token).await {
+            Ok(c) => {
+                let hash = hash_token_for_audit(id_token);
+                (c, hash)
+            }
+            Err(e) => {
+                error!("JWT validation failed after exchange: {}", e);
+                return Err((
+                    StatusCode::UNAUTHORIZED,
+                    format!("Invalid JWT: {}", e),
+                ));
+            }
+        }
+    } else if let Some(ref access_token) = tokens.access_token {
+        let provider = tokens
+            .user
+            .as_ref()
+            .and_then(|u| {
+                u.get("provider")
+                    .or_else(|| u.get("iss"))
+                    .and_then(|v| v.as_str())
+            })
+            .map(|s| {
+                if s.contains("facebook") {
+                    "facebook"
+                } else if s.contains("twitch") {
+                    "twitch"
+                } else {
+                    s
+                }
+            })
+            .unwrap_or("unknown");
+        let provider_lower = provider.to_lowercase();
+        if provider_lower == "apple" || provider_lower == "google" {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "id_token required for Google/Apple".to_string(),
+            ));
+        }
+        match state
+            .access_token_validator
+            .extract_claims_from_token(provider, access_token)
+            .await
+        {
+            Ok(c) => {
+                let hash = hash_token_for_audit(access_token);
+                (c, hash)
+            }
+            Err(e) => {
+                error!("Access token validation failed: {}", e);
+                return Err((
+                    StatusCode::UNAUTHORIZED,
+                    format!("Invalid token for provider {}: {}", provider, e),
+                ));
+            }
+        }
+    } else {
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            "Auth response missing id_token and access_token".to_string(),
+        ));
+    };
+
+    let user_identifier = JwtValidator::generate_user_identifier(&claims);
+    info!(
+        "Auth callback: salt lookup for user {} (iss: {}, sub: {})",
+        user_identifier, claims.iss, claims.sub
+    );
+
+    let salt = match state.store.get_salt(&claims).await {
+        Ok(Some(existing)) => {
+            state
+                .salt_manager
+                .decrypt_salt(&existing.encrypted_salt)
+                .map_err(|e| {
+                    error!("Failed to decrypt salt: {}", e);
+                    (StatusCode::INTERNAL_SERVER_ERROR, "Decryption error".to_string())
+                })?
+        }
+        Ok(None) => {
+            let salt_bytes = state.salt_manager.generate_salt(&claims).map_err(|e| {
+                error!("Failed to generate salt: {}", e);
+                (StatusCode::INTERNAL_SERVER_ERROR, "Salt generation error".to_string())
+            })?;
+            let encrypted = state.salt_manager.encrypt_salt(&salt_bytes).map_err(|e| {
+                error!("Failed to encrypt salt: {}", e);
+                (StatusCode::INTERNAL_SERVER_ERROR, "Encryption error".to_string())
+            })?;
+            let stored = state.store.store_salt(&claims, &encrypted).await.map_err(|e| {
+                error!("Failed to store salt: {}", e);
+                (StatusCode::INTERNAL_SERVER_ERROR, "Storage error".to_string())
+            })?;
+            state
+                .salt_manager
+                .decrypt_salt(&stored.encrypted_salt)
+                .map_err(|e| {
+                    error!("Failed to decrypt stored salt: {}", e);
+                    (StatusCode::INTERNAL_SERVER_ERROR, "Decryption error".to_string())
+                })?
+        }
+        Err(e) => {
+            error!("Database error: {}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Database error: {}", e),
+            ));
+        }
+    };
+
+    let _ = state.store.log_audit(
+        &user_identifier,
+        ActionType::Read,
+        Some(addr.ip().to_string()),
+        None,
+        Some(token_hash),
+        true,
+        None,
+    ).await;
+
+    Ok(Json(AuthCallbackResponse {
+        user: tokens.user,
+        salt: salt_to_bigint_string(&salt),
+        access_token: tokens.access_token,
+    }))
+}
 
 /// Get service metrics
 pub async fn get_metrics(

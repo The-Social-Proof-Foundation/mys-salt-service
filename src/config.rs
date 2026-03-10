@@ -3,6 +3,12 @@ use serde::{Deserialize, Serialize};
 use std::env;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AllowedClient {
+    pub client_id: String,
+    pub redirect_uri: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub database_url: String,
     pub master_seed_base64: String,
@@ -21,6 +27,9 @@ pub struct Config {
     pub allowed_audience_facebook: Option<String>,
     /// Canonical aud for Twitch access-token flow.
     pub allowed_audience_twitch: Option<String>,
+    pub auth_api_base_url: Option<String>,
+    pub allowed_clients: Vec<AllowedClient>,
+    pub auth_client_secret: Option<String>,
 }
 
 impl Config {
@@ -55,6 +64,9 @@ impl Config {
             allowed_audience_apple: env::var("ALLOWED_AUDIENCE_APPLE").ok(),
             allowed_audience_facebook: env::var("ALLOWED_AUDIENCE_FACEBOOK").ok(),
             allowed_audience_twitch: env::var("ALLOWED_AUDIENCE_TWITCH").ok(),
+            auth_api_base_url: env::var("AUTH_API_BASE_URL").ok(),
+            allowed_clients: parse_allowed_clients().unwrap_or_default(),
+            auth_client_secret: env::var("AUTH_CLIENT_SECRET").ok(),
         })
     }
 
@@ -91,6 +103,19 @@ impl Config {
             anyhow::bail!("ALLOWED_AUDIENCE_TWITCH must be set when TWITCH_CLIENT_ID is configured");
         }
 
+        if self.auth_api_base_url.is_some() && self.allowed_clients.is_empty() {
+            anyhow::bail!("ALLOWED_CLIENTS must be non-empty when AUTH_API_BASE_URL is configured");
+        }
+
         Ok(())
     }
-} 
+}
+
+fn parse_allowed_clients() -> Result<Vec<AllowedClient>> {
+    let s = env::var("ALLOWED_CLIENTS").ok();
+    let s = match s {
+        Some(s) if !s.trim().is_empty() => s,
+        _ => return Ok(Vec::new()),
+    };
+    serde_json::from_str(&s).context("Invalid ALLOWED_CLIENTS JSON")
+}

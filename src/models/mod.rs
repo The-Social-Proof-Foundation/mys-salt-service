@@ -120,7 +120,34 @@ impl GetSaltRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GetSaltResponse {
-    pub salt: String,  // Base64 encoded
+    pub salt: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthCallbackRequest {
+    pub client_id: String,
+    pub code: String,
+    pub state: Option<String>,
+    pub nonce: Option<String>,
+    #[serde(rename = "code_verifier")]
+    pub code_verifier: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthExchangeResponse {
+    pub access_token: Option<String>,
+    #[serde(rename = "id_token")]
+    pub id_token: Option<String>,
+    pub refresh_token: Option<String>,
+    pub expires_in: Option<u64>,
+    pub user: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthCallbackResponse {
+    pub user: Option<serde_json::Value>,
+    pub salt: String,
+    pub access_token: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

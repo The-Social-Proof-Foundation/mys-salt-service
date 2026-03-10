@@ -13,5 +13,6 @@ pub struct AppState {
     pub jwt_validator: Arc<JwtValidator>,
     pub access_token_validator: Arc<AccessTokenValidator>,
     pub metrics: Arc<Metrics>,
+    pub http_client: reqwest::Client,
 }
 
