@@ -1,5 +1,5 @@
 # Build stage
-FROM rust:1.82 AS builder
+FROM rust:latest AS builder
 
 WORKDIR /app
 
@@ -9,6 +9,9 @@ COPY Cargo.toml Cargo.lock ./
 # Copy source code
 COPY src ./src
 COPY migrations ./migrations
+
+# Clone myso-rust-sdk for path dependency (git dep fails in workspace)
+RUN git clone https://github.com/The-Social-Proof-Foundation/myso-rust-sdk /app/myso-rust-sdk
 
 # Build for release
 RUN cargo build --release

@@ -1458,7 +1458,7 @@ dependencies = [
 [[package]]
 name = "myso-sdk-types"
 version = "0.2.2"
-source = "git+https://github.com/The-Social-Proof-Foundation/myso-rust-sdk#b82443982c9af6798a3af0499ef944f7d5ae76d0"
+source = "git+https://github.com/the-social-proof-foundation/myso-rust-sdk?branch=main#b82443982c9af6798a3af0499ef944f7d5ae76d0"
 dependencies = [
  "base64ct",
  "blake2",

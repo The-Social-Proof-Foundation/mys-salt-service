@@ -1,5 +1,8 @@
 /target
 
+# Cloned SDK (Docker clones at build; for local dev: git clone or symlink to ../myso-rust-sdk)
+myso-rust-sdk/
+
 # Environment variables - NEVER commit these!
 .env
 .env.*
