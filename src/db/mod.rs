@@ -105,6 +105,32 @@ impl SaltStore {
         Ok(salt)
     }
 
+    /// Retrieve encrypted salt by user identifier (for MySocial JWT where sub = OAuth user_identifier).
+    pub async fn get_salt_by_user_identifier(&self, user_identifier: &str) -> Result<Option<UserSalt>> {
+        let salt = sqlx::query_as::<_, UserSalt>(
+            r#"
+            SELECT 
+                id, 
+                user_identifier, 
+                iss, 
+                aud, 
+                sub, 
+                encrypted_salt, 
+                encryption_version, 
+                created_at, 
+                updated_at
+            FROM user_salts
+            WHERE user_identifier = $1
+            "#
+        )
+        .bind(user_identifier)
+        .fetch_optional(&self.pool)
+        .await
+        .context("Failed to retrieve salt by user identifier")?;
+
+        Ok(salt)
+    }
+
     /// Log an audit entry
     pub async fn log_audit(
         &self,

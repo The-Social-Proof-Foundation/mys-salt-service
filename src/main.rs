@@ -60,6 +60,9 @@ async fn main() -> Result<()> {
     let jwt_validator = Arc::new(JwtValidator::new(
         config.allowed_audience_google.clone(),
         config.allowed_audience_apple.clone(),
+        config.mysocial_auth_issuer.clone(),
+        config.mysocial_auth_jwks_uri.clone(),
+        config.allowed_audience_mysocial.clone(),
     ));
     let access_token_validator = Arc::new(AccessTokenValidator::new(
         config.twitch_client_id.clone(),

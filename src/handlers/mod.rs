@@ -13,7 +13,7 @@ use crate::{
         GetSaltRequest, GetSaltResponse, HealthCheckResponse, ActionType,
         AuthCallbackRequest, AuthCallbackResponse,
     },
-    security::{jwt::JwtValidator, hash_token_for_audit},
+    security::{address_derivation, jwt::JwtValidator, hash_token_for_audit},
     state::AppState,
 };
 
@@ -159,7 +159,7 @@ pub async fn get_salt(
             }
         }
     } else {
-        // Provider + token request (Facebook/Twitch only)
+        // Provider + token request (Facebook/Twitch/MySocial)
         let provider = request.provider().unwrap_or("unknown");
         let provider_lower = provider.to_lowercase();
         
@@ -173,46 +173,75 @@ pub async fn get_salt(
         
         let token = request.token();
         
-        match state.access_token_validator.extract_claims_from_token(provider, token).await {
-            Ok(c) => {
-                let hash = hash_token_for_audit(token);
-                (c, hash)
+        let (claims, token_hash) = if provider_lower == "mysocial" {
+            match state.jwt_validator.validate(token).await {
+                Ok(c) => {
+                    let hash = hash_token_for_audit(token);
+                    (c, hash)
+                }
+                Err(e) => {
+                    error!("MySocial JWT validation failed: {}", e);
+                    state.metrics.increment_jwt_failed();
+                    state.metrics.increment_failed();
+                    let _ = state.store.log_audit(
+                        "unknown",
+                        ActionType::Error,
+                        Some(ip_address),
+                        user_agent,
+                        Some(hash_token_for_audit(token)),
+                        false,
+                        Some(format!("MySocial: {}", e)),
+                    ).await;
+                    return Err((StatusCode::UNAUTHORIZED, "Invalid MySocial JWT".to_string()));
+                }
             }
-            Err(e) => {
-                error!("Access token validation failed for provider {}: {}", provider, e);
-                state.metrics.increment_jwt_failed();
-                state.metrics.increment_failed();
-                
-                // Log failed attempt
-                let _ = state.store.log_audit(
-                    "unknown",
-                    ActionType::Error,
-                    Some(ip_address),
-                    user_agent,
-                    Some(hash_token_for_audit(token)),
-                    false,
-                    Some(format!("Provider {}: {}", provider, e)),
-                ).await;
-                
-                return Err((
-                    StatusCode::UNAUTHORIZED,
-                    format!("Invalid token for provider {}", provider),
-                ));
+        } else {
+            match state.access_token_validator.extract_claims_from_token(provider, token).await {
+                Ok(c) => {
+                    let hash = hash_token_for_audit(token);
+                    (c, hash)
+                }
+                Err(e) => {
+                    error!("Access token validation failed for provider {}: {}", provider, e);
+                    state.metrics.increment_jwt_failed();
+                    state.metrics.increment_failed();
+                    let _ = state.store.log_audit(
+                        "unknown",
+                        ActionType::Error,
+                        Some(ip_address),
+                        user_agent,
+                        Some(hash_token_for_audit(token)),
+                        false,
+                        Some(format!("Provider {}: {}", provider, e)),
+                    ).await;
+                    return Err((
+                        StatusCode::UNAUTHORIZED,
+                        format!("Invalid token for provider {}", provider),
+                    ));
+                }
             }
-        }
+        };
+        (claims, token_hash)
     };
 
-    let user_identifier = JwtValidator::generate_user_identifier(&claims);
-    let token_hash = token_hash;
+    let user_identifier = if state.config.mysocial_auth_issuer.as_ref().is_some_and(|iss| claims.iss == *iss) {
+        claims.sub.clone()
+    } else {
+        JwtValidator::generate_user_identifier(&claims)
+    };
 
-    // Log the lookup attempt for debugging
     info!(
         "Salt lookup for user: {} (iss: {}, sub: {})",
         user_identifier, claims.iss, claims.sub
     );
 
-    // Check or generate salt
-    let salt = match state.store.get_salt(&claims).await {
+    let is_mysocial = state.config.mysocial_auth_issuer.as_ref().is_some_and(|iss| claims.iss == *iss);
+
+    let salt = match if is_mysocial {
+        state.store.get_salt_by_user_identifier(&user_identifier).await
+    } else {
+        state.store.get_salt(&claims).await
+    } {
         Ok(Some(existing)) => {
             // Decrypt existing salt
             let decrypted = state
@@ -240,6 +269,14 @@ pub async fn get_salt(
             decrypted
         }
         Ok(None) => {
+            if is_mysocial {
+                error!("No salt found for MySocial user {} - user must authenticate via OAuth first", user_identifier);
+                state.metrics.increment_failed();
+                return Err((
+                    StatusCode::NOT_FOUND,
+                    "No salt found for this user. Please authenticate via OAuth (Google, Apple, etc.) first.".to_string(),
+                ));
+            }
             // Generate new salt
             let salt = state
                 .salt_manager
@@ -579,11 +616,27 @@ pub async fn auth_provider_callback(
         .or(tokens.access_token.clone())
         .unwrap_or_default();
 
+    let salt_str = salt_to_bigint_string(&salt);
+    let user = match address_derivation::derive_ed25519_address(&claims.sub, &salt_str) {
+        Ok(address) => {
+            let mut user_obj = serde_json::Map::new();
+            user_obj.insert("address".to_string(), serde_json::Value::String(address));
+            if let Some(ref email) = claims.email {
+                user_obj.insert("email".to_string(), serde_json::Value::String(email.clone()));
+            }
+            Some(serde_json::Value::Object(user_obj))
+        }
+        Err(e) => {
+            error!("Failed to derive Ed25519 address: {}", e);
+            None
+        }
+    };
+
     Ok(Json(AuthCallbackResponse {
         code,
-        salt: salt_to_bigint_string(&salt),
+        salt: salt_str,
         id_token: tokens.id_token.clone(),
-        user: tokens.user,
+        user,
         access_token: tokens.access_token,
     }))
 }

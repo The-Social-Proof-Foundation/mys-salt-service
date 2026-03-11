@@ -39,6 +39,12 @@ pub struct Config {
     /// Auth frontend OAuth callback URL (where Google/Apple redirect after login). Used for token exchange.
     pub auth_callback_url: Option<String>,
     pub allowed_clients: Vec<AllowedClient>,
+    /// MySocial Auth issuer (e.g. https://auth.testnet.mysocial.network).
+    pub mysocial_auth_issuer: Option<String>,
+    /// MySocial Auth JWKS URI for JWT validation.
+    pub mysocial_auth_jwks_uri: Option<String>,
+    /// Canonical aud for MySocial Auth JWT validation (optional).
+    pub allowed_audience_mysocial: Option<String>,
 }
 
 impl Config {
@@ -80,6 +86,9 @@ impl Config {
             allowed_audience_twitch: env::var("ALLOWED_AUDIENCE_TWITCH").ok(),
             auth_callback_url: env::var("AUTH_CALLBACK_URL").ok(),
             allowed_clients: parse_allowed_clients_for_auth()?,
+            mysocial_auth_issuer: env::var("MYSOCIAL_AUTH_ISSUER").ok(),
+            mysocial_auth_jwks_uri: env::var("MYSOCIAL_AUTH_JWKS_URI").ok(),
+            allowed_audience_mysocial: env::var("ALLOWED_AUDIENCE_MYSOCIAL").ok(),
         })
     }
 

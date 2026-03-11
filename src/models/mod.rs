@@ -224,4 +224,13 @@ impl OAuthProviderConfig {
             userinfo_endpoint: Some("https://api.twitch.tv/helix/users".to_string()),
         }
     }
+
+    pub fn mysocial(issuer: String, jwks_uri: String) -> Self {
+        Self {
+            issuer,
+            jwks_uri,
+            token_endpoint: None,
+            userinfo_endpoint: None,
+        }
+    }
 } 

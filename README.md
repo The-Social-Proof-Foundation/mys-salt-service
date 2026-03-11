@@ -120,6 +120,11 @@ ALLOWED_CLIENTS='[{"client_id":"mysocial-auth-client-id","redirect_uri":"http://
 # Auth frontend OAuth callback URL (must match auth frontend and Google Console)
 AUTH_CALLBACK_URL=https://auth.testnet.mysocial.network/callback
 
+# MySocial Auth (optional) – for validating JWTs issued by the auth backend
+MYSOCIAL_AUTH_ISSUER=https://auth.testnet.mysocial.network
+MYSOCIAL_AUTH_JWKS_URI=https://auth.testnet.mysocial.network/.well-known/jwks.json
+# ALLOWED_AUDIENCE_MYSOCIAL=  # optional, for audience validation
+
 # Provider credentials for token exchange (in-band; no external auth API)
 GOOGLE_CLIENT_SECRET=<your-google-client-secret>
 APPLE_TEAM_ID=<your-apple-team-id>
@@ -168,11 +173,22 @@ or
 }
 ```
 
+**Request Format 3: MySocial Auth (provider + JWT)**
+```json
+{
+  "provider": "mysocial",
+  "token": "<mysocial-jwt>"
+}
+```
+
+MySocial JWTs can also use the JWT format when the issuer is configured: `{ "jwt": "<mysocial-jwt>" }`.
+
 **Supported Providers:**
 - `google` - **JWT format only** (`{ "jwt": "id_token" }`)
 - `apple` - **JWT format only** (`{ "jwt": "id_token" }`)
 - `facebook` - **Provider + token format** (`{ "provider": "facebook", "token": "access_token" }`)
 - `twitch` - **Provider + token format** (`{ "provider": "twitch", "token": "access_token" }`)
+- `mysocial` - **Provider + JWT format** (`{ "provider": "mysocial", "token": "<mysocial-jwt>" }`) – requires `MYSOCIAL_AUTH_ISSUER` and `MYSOCIAL_AUTH_JWKS_URI`
 
 **Important Notes:**
 - Google and Apple use JWT ID tokens and must use the `jwt` field format

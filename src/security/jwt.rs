@@ -17,6 +17,7 @@ pub struct JwtValidator {
     cache_duration: Duration,
     allowed_audience_google: Option<String>,
     allowed_audience_apple: Option<String>,
+    allowed_audience_mysocial: Option<String>,
 }
 
 impl JwtValidator {
@@ -45,6 +46,9 @@ impl JwtValidator {
     pub fn new(
         allowed_audience_google: Option<String>,
         allowed_audience_apple: Option<String>,
+        mysocial_auth_issuer: Option<String>,
+        mysocial_auth_jwks_uri: Option<String>,
+        allowed_audience_mysocial: Option<String>,
     ) -> Self {
         let mut providers = HashMap::new();
         providers.insert(
@@ -56,6 +60,15 @@ impl JwtValidator {
             OAuthProviderConfig::apple(),
         );
 
+        if let (Some(ref iss), Some(ref jwks)) = (&mysocial_auth_issuer, &mysocial_auth_jwks_uri) {
+            if !iss.is_empty() && !jwks.is_empty() {
+                providers.insert(
+                    iss.clone(),
+                    OAuthProviderConfig::mysocial(iss.clone(), jwks.clone()),
+                );
+            }
+        }
+
         Self {
             client: Client::builder()
                 .timeout(Duration::from_secs(10))
@@ -66,24 +79,29 @@ impl JwtValidator {
             cache_duration: Duration::from_secs(3600), // 1 hour cache
             allowed_audience_google,
             allowed_audience_apple,
+            allowed_audience_mysocial,
         }
     }
 
     /// Validate that claims.aud matches the configured allowed audience for the issuer.
     fn validate_audience(&self, claims: &JwtClaims) -> Result<()> {
-        let allowed = match claims.iss.as_str() {
-            "https://accounts.google.com" => self.allowed_audience_google.as_ref(),
-            "https://appleid.apple.com" => self.allowed_audience_apple.as_ref(),
-            _ => None,
+        let allowed = if claims.iss == "https://accounts.google.com" {
+            self.allowed_audience_google.as_ref()
+        } else if claims.iss == "https://appleid.apple.com" {
+            self.allowed_audience_apple.as_ref()
+        } else if self.providers.contains_key(&claims.iss) {
+            self.allowed_audience_mysocial.as_ref()
+        } else {
+            None
         };
-        let allowed = allowed
-            .context("No allowed audience configured for this provider")?;
-        if claims.aud != *allowed {
-            anyhow::bail!(
-                "Audience mismatch: expected {} for this provider, got {}",
-                allowed,
-                claims.aud
-            );
+        if let Some(allowed) = allowed {
+            if claims.aud != *allowed {
+                anyhow::bail!(
+                    "Audience mismatch: expected {} for this provider, got {}",
+                    allowed,
+                    claims.aud
+                );
+            }
         }
         Ok(())
     }
@@ -214,6 +232,9 @@ mod tests {
         let validator = JwtValidator::new(
             Some("expected-google-aud".to_string()),
             Some("expected-apple-aud".to_string()),
+            None,
+            None,
+            None,
         );
 
         let claims_wrong_aud = JwtClaims {
@@ -241,6 +262,9 @@ mod tests {
         let validator = JwtValidator::new(
             Some("expected-google-aud".to_string()),
             Some("expected-apple-aud".to_string()),
+            None,
+            None,
+            None,
         );
 
         let claims = JwtClaims {
