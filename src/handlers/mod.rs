@@ -230,7 +230,7 @@ pub async fn get_salt(
         JwtValidator::generate_user_identifier(&claims)
     };
 
-    info!(
+    tracing::debug!(
         "Salt lookup for user: {} (iss: {}, sub: {})",
         user_identifier, claims.iss, claims.sub
     );
@@ -264,7 +264,7 @@ pub async fn get_salt(
                 None,
             ).await;
 
-            info!("Successfully retrieved existing salt for user: {}", user_identifier);
+            tracing::debug!("Successfully retrieved existing salt for user: {}", user_identifier);
             state.metrics.increment_salt_retrieved();
             decrypted
         }
@@ -317,12 +317,7 @@ pub async fn get_salt(
 
             // Verify the decrypted salt matches what we generated (consistency check)
             if decrypted != salt {
-                error!(
-                    "CRITICAL: Stored salt mismatch for user {} - generated: {:?}, stored: {:?}",
-                    user_identifier,
-                    hex::encode(&salt),
-                    hex::encode(&decrypted)
-                );
+                error!("CRITICAL: Stored salt mismatch for user {} - consistency check failed", user_identifier);
                 state.metrics.increment_failed();
                 return Err((
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -344,11 +339,11 @@ pub async fn get_salt(
                     true,
                     None,
                 ).await;
-                info!("Successfully created new salt for user: {}", user_identifier);
+                tracing::debug!("Successfully created new salt for user: {}", user_identifier);
                 state.metrics.increment_salt_created();
             } else {
                 // Race condition: another request created it first
-                warn!("Race condition detected for user {} - salt was created by another request", user_identifier);
+                tracing::debug!("Race condition detected for user {} - salt was created by another request", user_identifier);
                 let _ = state.store.log_audit(
                     &user_identifier,
                     ActionType::Read,
@@ -555,7 +550,7 @@ pub async fn auth_provider_callback(
     };
 
     let user_identifier = JwtValidator::generate_user_identifier(&claims);
-    info!(
+    tracing::debug!(
         "Auth callback: salt lookup for user {} (iss: {}, sub: {})",
         user_identifier, claims.iss, claims.sub
     );
@@ -713,8 +708,6 @@ pub async fn get_salt_test(
         family_name: payload.get("family_name").and_then(|v| v.as_str()).map(|s| s.to_string()),
     };
 
-    let user_identifier = JwtValidator::generate_user_identifier(&claims);
-
     // Generate salt (same logic as production)
     let salt = state
         .salt_manager
@@ -724,9 +717,8 @@ pub async fn get_salt_test(
             (StatusCode::INTERNAL_SERVER_ERROR, "Generation error".to_string())
         })?;
 
-    // Log for testing
-    info!("Test endpoint: Generated salt for claims: {:?}", claims);
-    info!("Test endpoint: User identifier: {}", user_identifier);
+    // Log for testing (iss/aud only - never log sub, email, or other PII)
+    info!("Test endpoint: Generated salt for iss={} aud={}", claims.iss, claims.aud);
 
     state.metrics.increment_success();
     Ok(Json(GetSaltResponse {
