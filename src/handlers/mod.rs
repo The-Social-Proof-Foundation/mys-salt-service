@@ -192,7 +192,10 @@ pub async fn get_salt(
                         false,
                         Some(format!("MySocial: {}", e)),
                     ).await;
-                    return Err((StatusCode::UNAUTHORIZED, "Invalid MySocial JWT".to_string()));
+                    return Err((
+                        StatusCode::UNAUTHORIZED,
+                        "Invalid MySocial JWT. Ensure you are sending id_token (JWT), not access_token.".to_string(),
+                    ));
                 }
             }
         } else {
