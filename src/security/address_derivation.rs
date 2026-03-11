@@ -1,10 +1,11 @@
 //! Ed25519 address derivation from sub + salt.
 //!
 //! Formula: combinedSeed = sub + "_" + salt → SHA256 → seed[0:32] → Ed25519 keypair → address
-//! Address format: 0x + 64 hex characters (32 bytes), Sui-style.
+//! Address format: MySo-style (Blake2b of 0x00 || pubkey) → 0x + 64 hex characters.
 
 use anyhow::Result;
 use ed25519_dalek::SigningKey;
+use myso_sdk_types::Ed25519PublicKey;
 use sha2::{Digest, Sha256};
 
 /// Derive an Ed25519 address from sub and salt.
@@ -31,7 +32,8 @@ pub fn derive_ed25519_address(sub: &str, salt: &str) -> Result<String> {
     let signing_key = SigningKey::from_bytes(&seed);
     let verifying_key = signing_key.verifying_key();
 
-    let address = format!("0x{}", hex::encode(verifying_key.as_bytes()));
+    let public_key = Ed25519PublicKey::new(verifying_key.to_bytes());
+    let address = public_key.derive_address().to_string();
     Ok(address)
 }
 
