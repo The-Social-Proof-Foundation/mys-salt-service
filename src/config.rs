@@ -45,6 +45,11 @@ pub struct Config {
     pub mysocial_auth_jwks_uri: Option<String>,
     /// Canonical aud for MySocial Auth JWT validation (optional).
     pub allowed_audience_mysocial: Option<String>,
+    /// Base64-encoded HS256 secret for signing session access tokens (min 32 bytes).
+    /// When set, auth callbacks return session_access_token and refresh_token.
+    pub jwt_signing_key: Option<String>,
+    /// Issuer claim for session JWTs (e.g. https://salt.mysocial.network).
+    pub jwt_issuer: Option<String>,
 }
 
 impl Config {
@@ -89,6 +94,10 @@ impl Config {
             mysocial_auth_issuer: env::var("MYSOCIAL_AUTH_ISSUER").ok(),
             mysocial_auth_jwks_uri: env::var("MYSOCIAL_AUTH_JWKS_URI").ok(),
             allowed_audience_mysocial: env::var("ALLOWED_AUDIENCE_MYSOCIAL").ok(),
+            jwt_signing_key: env::var("JWT_SIGNING_KEY").ok(),
+            jwt_issuer: env::var("JWT_ISSUER")
+                .ok()
+                .or_else(|| Some("https://salt.testnet.mysocial.network".to_string())),
         })
     }
 

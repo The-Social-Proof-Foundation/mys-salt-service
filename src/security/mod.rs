@@ -1,6 +1,8 @@
 pub mod access_token;
 pub mod address_derivation;
 pub mod jwt;
+pub mod session_token;
+pub mod wallet_signature;
 
 use anyhow::Result;
 use chacha20poly1305::{

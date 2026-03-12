@@ -152,6 +152,41 @@ pub struct AuthCallbackResponse {
     pub id_token: Option<String>,
     pub user: Option<serde_json::Value>,
     pub access_token: Option<String>,
+    /// Session access token (JWT, 30 min) when JWT_SIGNING_KEY is configured.
+    #[serde(rename = "session_access_token")]
+    pub session_access_token: Option<String>,
+    /// Refresh token (opaque, 30 days) when JWT_SIGNING_KEY is configured.
+    #[serde(rename = "refresh_token")]
+    pub refresh_token: Option<String>,
+    /// Access token expiry in seconds (1800).
+    #[serde(rename = "expires_in")]
+    pub expires_in: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct RefreshSession {
+    pub id: Uuid,
+    pub user_identifier: String,
+    pub refresh_token_hash: String,
+    pub expires_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WalletAuthRequest {
+    pub address: String,
+    pub message: String,
+    /// Base64-encoded Ed25519 SimpleSignature (1 + 64 + 32 bytes).
+    pub signature: String,
+    pub client_id: String,
+    #[serde(default)]
+    pub redirect_uri: Option<String>,
+    #[serde(default)]
+    pub state: Option<String>,
+    #[serde(default)]
+    pub nonce: Option<String>,
+    #[serde(rename = "request_id")]
+    pub request_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

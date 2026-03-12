@@ -126,10 +126,15 @@ fn build_router(state: AppState, allowed_origins: &[String]) -> Router {
         .route("/metrics", get(myso_salt_service::handlers::get_metrics));
 
     if !state.config.allowed_clients.is_empty() {
-        router = router.route(
-            "/auth/provider/callback",
-            post(myso_salt_service::handlers::auth_provider_callback),
-        );
+        router = router
+            .route(
+                "/auth/provider/callback",
+                post(myso_salt_service::handlers::auth_provider_callback),
+            )
+            .route(
+                "/auth/wallet/callback",
+                post(myso_salt_service::handlers::auth_wallet_callback),
+            );
     }
 
     router
@@ -149,10 +154,10 @@ async fn run_migrations(store: &SaltStore) -> Result<()> {
 
 async fn cleanup_task(store: SaltStore) {
     let mut interval = tokio::time::interval(Duration::from_secs(3600)); // 1 hour
-    
+
     loop {
         interval.tick().await;
-        
+
         match store.cleanup_rate_limits(24).await {
             Ok(count) => {
                 if count > 0 {
@@ -161,6 +166,17 @@ async fn cleanup_task(store: SaltStore) {
             }
             Err(e) => {
                 error!("Failed to cleanup rate limits: {}", e);
+            }
+        }
+
+        match store.cleanup_expired_refresh_sessions().await {
+            Ok(count) => {
+                if count > 0 {
+                    info!("Cleaned up {} expired refresh sessions", count);
+                }
+            }
+            Err(e) => {
+                error!("Failed to cleanup expired refresh sessions: {}", e);
             }
         }
     }

@@ -1,7 +1,10 @@
 use anyhow::{Context, Result};
 use sqlx::{postgres::PgPoolOptions, PgPool};
 
-use crate::models::{ActionType, AuditLogEntry, JwtClaims, UserSalt};
+use chrono::Utc;
+use uuid::Uuid;
+
+use crate::models::{ActionType, AuditLogEntry, JwtClaims, RefreshSession, UserSalt};
 use crate::security::jwt::JwtValidator;
 
 #[derive(Clone)]
@@ -238,6 +241,76 @@ impl SaltStore {
         .execute(&self.pool)
         .await
         .context("Failed to cleanup rate limits")?;
+
+        Ok(result.rows_affected())
+    }
+
+    /// Store a refresh session (30 days TTL).
+    pub async fn store_refresh_session(
+        &self,
+        user_identifier: &str,
+        refresh_token_hash: &str,
+        expires_at: chrono::DateTime<Utc>,
+    ) -> Result<Uuid> {
+        let row: (Uuid,) = sqlx::query_as(
+            r#"
+            INSERT INTO refresh_sessions (user_identifier, refresh_token_hash, expires_at)
+            VALUES ($1, $2, $3)
+            RETURNING id
+            "#,
+        )
+        .bind(user_identifier)
+        .bind(refresh_token_hash)
+        .bind(expires_at)
+        .fetch_one(&self.pool)
+        .await
+        .context("Failed to store refresh session")?;
+
+        Ok(row.0)
+    }
+
+    /// Get a refresh session by token hash if not expired.
+    pub async fn get_refresh_session(&self, refresh_token_hash: &str) -> Result<Option<RefreshSession>> {
+        let session = sqlx::query_as::<_, RefreshSession>(
+            r#"
+            SELECT id, user_identifier, refresh_token_hash, expires_at, created_at
+            FROM refresh_sessions
+            WHERE refresh_token_hash = $1 AND expires_at > NOW()
+            "#,
+        )
+        .bind(refresh_token_hash)
+        .fetch_optional(&self.pool)
+        .await
+        .context("Failed to get refresh session")?;
+
+        Ok(session)
+    }
+
+    /// Delete a refresh session by token hash.
+    pub async fn delete_refresh_session(&self, refresh_token_hash: &str) -> Result<bool> {
+        let result = sqlx::query(
+            r#"
+            DELETE FROM refresh_sessions WHERE refresh_token_hash = $1
+            "#,
+        )
+        .bind(refresh_token_hash)
+        .execute(&self.pool)
+        .await
+        .context("Failed to delete refresh session")?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Clean up expired refresh sessions.
+    pub async fn cleanup_expired_refresh_sessions(&self) -> Result<u64> {
+        let result = sqlx::query(
+            r#"
+            DELETE FROM refresh_sessions WHERE expires_at <= NOW()
+            "#,
+        )
+        .execute(&self.pool)
+        .await
+        .context("Failed to cleanup expired refresh sessions")?;
 
         Ok(result.rows_affected())
     }
