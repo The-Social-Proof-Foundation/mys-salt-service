@@ -10,7 +10,7 @@ use hex;
 use chrono::Utc;
 
 use crate::{
-    config::oauth_redirect_uri_for_exchange,
+    config::resolve_oauth_redirect_uri_for_token_exchange,
     auth::exchange,
     models::{
         GetSaltRequest, GetSaltResponse, HealthCheckResponse, ActionType,
@@ -473,20 +473,25 @@ pub async fn auth_provider_callback(
     let oauth_client_id = get_oauth_client_id_for_provider(&provider, &request.client_id, &state.config)
         .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
 
-    let oauth_redirect_uri = oauth_redirect_uri_for_exchange(
+    let oauth_redirect_uri = resolve_oauth_redirect_uri_for_token_exchange(
+        request.redirect_uri.as_deref(),
         client_meta,
         state.config.auth_callback_url.as_deref(),
     )
-    .ok_or((
-        StatusCode::INTERNAL_SERVER_ERROR,
-        "AUTH_CALLBACK_URL not configured and client has no redirect_uri".to_string(),
-    ))?;
+    .map_err(|e| {
+        let status = if e.starts_with("redirect_uri mismatch:") {
+            StatusCode::BAD_REQUEST
+        } else {
+            StatusCode::INTERNAL_SERVER_ERROR
+        };
+        (status, e)
+    })?;
 
     let tokens = exchange::exchange_code_for_tokens(
         &state.http_client,
         &provider,
         &request.code,
-        oauth_redirect_uri,
+        oauth_redirect_uri.as_str(),
         &oauth_client_id,
         request.code_verifier.as_deref(),
         &state.config,

@@ -178,6 +178,45 @@ pub fn oauth_redirect_uri_for_exchange<'a>(
     auth_callback_url.map(str::trim).filter(|s| !s.is_empty())
 }
 
+fn trim_oauth_redirect_uri(s: &str) -> &str {
+    s.trim().trim_end_matches('/')
+}
+
+/// Google/Apple token exchange must use the same `redirect_uri` as the authorize step.
+/// The auth frontend sends it in the JSON body. Falls back to [`oauth_redirect_uri_for_exchange`]
+/// when omitted (legacy clients).
+pub fn resolve_oauth_redirect_uri_for_token_exchange(
+    request_redirect_uri: Option<&str>,
+    client: &AllowedClient,
+    auth_callback_url: Option<&str>,
+) -> Result<String, String> {
+    let body = request_redirect_uri
+        .map(trim_oauth_redirect_uri)
+        .filter(|s| !s.is_empty());
+    match body {
+        Some(uri) => {
+            if let Some(ac) = auth_callback_url
+                .map(trim_oauth_redirect_uri)
+                .filter(|s| !s.is_empty())
+            {
+                if uri != ac {
+                    return Err(format!(
+                        "redirect_uri mismatch: must match AUTH_CALLBACK_URL for token exchange (got {uri}, expected {ac})"
+                    ));
+                }
+            }
+            Ok(uri.to_string())
+        }
+        None => oauth_redirect_uri_for_exchange(client, auth_callback_url)
+            .map(trim_oauth_redirect_uri)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .ok_or_else(|| {
+                "AUTH_CALLBACK_URL not configured and client has no redirect_uri".to_string()
+            }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -238,6 +277,53 @@ mod tests {
         assert_eq!(
             oauth_redirect_uri_for_exchange(&client, Some("https://global/cb")),
             Some("https://global/cb")
+        );
+    }
+
+    #[test]
+    fn resolve_prefers_request_body_when_matches_auth_callback() {
+        let client = AllowedClient {
+            client_id: "x".into(),
+            redirect_uri: "https://consumer.app/cb".into(),
+        };
+        assert_eq!(
+            resolve_oauth_redirect_uri_for_token_exchange(
+                Some("https://auth.example/callback"),
+                &client,
+                Some("https://auth.example/callback"),
+            ),
+            Ok("https://auth.example/callback".into())
+        );
+    }
+
+    #[test]
+    fn resolve_rejects_body_when_auth_callback_differs() {
+        let client = AllowedClient {
+            client_id: "x".into(),
+            redirect_uri: "https://consumer.app/cb".into(),
+        };
+        assert!(resolve_oauth_redirect_uri_for_token_exchange(
+            Some("https://auth.example/callback"),
+            &client,
+            Some("https://other/callback"),
+        )
+        .unwrap_err()
+        .starts_with("redirect_uri mismatch:"));
+    }
+
+    #[test]
+    fn resolve_accepts_body_when_no_global_callback_configured() {
+        let client = AllowedClient {
+            client_id: "x".into(),
+            redirect_uri: "https://consumer.app/cb".into(),
+        };
+        assert_eq!(
+            resolve_oauth_redirect_uri_for_token_exchange(
+                Some("https://auth.example/callback"),
+                &client,
+                None,
+            ),
+            Ok("https://auth.example/callback".into())
         );
     }
 

@@ -131,6 +131,13 @@ pub struct AuthCallbackRequest {
     pub provider: Option<String>,
     pub state: Option<String>,
     pub nonce: Option<String>,
+    /// PKCE (stored for API compatibility; token exchange uses `code_verifier`).
+    #[serde(default)]
+    pub code_challenge: Option<String>,
+    /// OAuth provider redirect URI — must match the `redirect_uri` used in the authorize request
+    /// (auth frontend `/callback`), not the consuming app’s final redirect.
+    #[serde(default)]
+    pub redirect_uri: Option<String>,
     #[serde(rename = "code_verifier")]
     pub code_verifier: Option<String>,
 }
