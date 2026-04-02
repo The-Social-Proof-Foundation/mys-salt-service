@@ -1,6 +1,5 @@
 pub mod auth;
 pub mod config;
-pub mod indexer_platforms;
 pub mod db;
 pub mod handlers;
 pub mod models;

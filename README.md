@@ -115,24 +115,10 @@ TWITCH_CLIENT_ID=<your-twitch-client-id>  # Required for Twitch authentication
 FACEBOOK_APP_ID=<your-facebook-app-id>    # Required for Facebook authentication
 FACEBOOK_APP_SECRET=<your-facebook-app-secret>
 
-# Auth callback (POST /auth/provider/callback). Enabled when the merged allowlist is non-empty.
-# Optional: extra OAuth clients (JSON). Same `client_id` overrides indexer row.
+# Auth callback (POST /auth/provider/callback). Enabled when ALLOWED_CLIENTS is non-empty.
 ALLOWED_CLIENTS='[{"client_id":"mysocial-auth-client-id","redirect_uri":"http://localhost:3000/callback"}]'
 # Auth frontend OAuth callback URL — used when a client has no per-client redirect_uri (must match Google/Apple console for that flow)
 AUTH_CALLBACK_URL=https://auth.testnet.mysocial.network/callback
-
-# MySo indexer GraphQL — loads approved platforms via `platforms(approvedOnly: true, limit, offset)`.
-# When set, startup merges indexer rows with ALLOWED_CLIENTS (env wins on duplicate client_id).
-# Must return at least one platform passing filters, or the process exits.
-# MYSO_INDEXER_GRAPHQL_URL=https://your-indexer.example/graphql
-# INDEXER_PLATFORMS_PAGE_LIMIT=200
-# Status: optional allowlist (exact statusText match), else denylist applies.
-# PLATFORM_STATUS_ALLOWLIST=Live
-# PLATFORM_STATUS_DENYLIST=Shutdown,Sunset
-# Ordered keys inside `links` JSON for OAuth redirect / site URL (first match wins).
-# PLATFORM_LINKS_REDIRECT_KEYS=website,url,oauthRedirect
-# If true, skip indexer rows with no matching link URL.
-# REQUIRE_REDIRECT_URI_FROM_LINKS=false
 
 # MySocial Auth (optional) – for validating JWTs issued by the auth backend
 MYSOCIAL_AUTH_ISSUER=https://auth.testnet.mysocial.network
@@ -158,9 +144,7 @@ railway up
 Validates the salt service is ready (DB connectivity, salt derivation). Returns `{ "status": "ready", "salt_endpoint": "/salt" }`.
 
 ### POST /auth/provider/callback
-OAuth callback endpoint. Receives `{ client_id, code, provider?, state?, nonce?, code_verifier? }`. Looks up `client_id` in the merged allowlist (`platformId` from the indexer plus any `ALLOWED_CLIENTS` entries). Token exchange uses each client’s `redirect_uri` when set (from env JSON or parsed from indexer `links`); otherwise `AUTH_CALLBACK_URL`. Exchanges code for tokens in-band (Google, Apple, Facebook, Twitch), fetches salt, returns `{ code, user?, salt, access_token? }`. Routes are registered when the merged allowlist is non-empty.
-
-Indexer details: only **approved**, non-deleted platforms are returned from GraphQL. `statusText` is filtered in-process (see `PLATFORM_STATUS_ALLOWLIST` / `PLATFORM_STATUS_DENYLIST`). `developerAddress` is the developer wallet; `client_id` for OAuth is **`platformId`**, not the wallet address.
+OAuth callback endpoint. Receives `{ client_id, code, provider?, state?, nonce?, code_verifier? }`. Looks up `client_id` in `ALLOWED_CLIENTS`. Token exchange uses each client’s `redirect_uri` when set; otherwise `AUTH_CALLBACK_URL`. Exchanges code for tokens in-band (Google, Apple, Facebook, Twitch), fetches salt, returns `{ code, user?, salt, access_token? }`. Enabled when `ALLOWED_CLIENTS` is non-empty.
 
 ### POST /salt
 Get or create salt for a user.

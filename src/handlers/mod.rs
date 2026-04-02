@@ -482,21 +482,6 @@ pub async fn auth_provider_callback(
         "AUTH_CALLBACK_URL not configured and client has no redirect_uri".to_string(),
     ))?;
 
-    let redirect_source = if !client_meta.redirect_uri.trim().is_empty() {
-        "per_client_allowlist"
-    } else {
-        "global_auth_callback_url"
-    };
-    info!(
-        salt_client_id = %request.client_id,
-        provider = %provider,
-        oauth_client_id = %oauth_client_id,
-        redirect_uri = %oauth_redirect_uri,
-        redirect_source,
-        has_code_verifier = request.code_verifier.is_some(),
-        "Auth provider callback: starting token exchange (redirect_uri must match Google Authorized redirect URIs exactly)"
-    );
-
     let tokens = exchange::exchange_code_for_tokens(
         &state.http_client,
         &provider,
@@ -508,15 +493,7 @@ pub async fn auth_provider_callback(
     )
     .await
     .map_err(|e| {
-        error!(
-            salt_client_id = %request.client_id,
-            provider = %provider,
-            oauth_client_id = %oauth_client_id,
-            redirect_uri = %oauth_redirect_uri,
-            redirect_source,
-            error = %e,
-            "Token exchange failed; if Google reports redirect_uri_mismatch, register this exact redirect_uri in Google Cloud Console for this oauth_client_id"
-        );
+        error!("Token exchange failed: {}", e);
         (StatusCode::BAD_GATEWAY, format!("Auth exchange failed: {}", e))
     })?;
 

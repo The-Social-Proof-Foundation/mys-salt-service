@@ -38,22 +38,7 @@ pub struct Config {
     pub allowed_audience_twitch: Option<String>,
     /// Auth frontend OAuth callback URL (where Google/Apple redirect after login). Used for token exchange fallback when a client has no `redirect_uri`.
     pub auth_callback_url: Option<String>,
-    /// OAuth clients from `ALLOWED_CLIENTS` env JSON (before merge with indexer).
-    pub allowed_clients_env: Vec<AllowedClient>,
-    /// Merged allowlist: indexer platforms plus env (env overrides on same `client_id`).
     pub allowed_clients: Vec<AllowedClient>,
-    /// MySo indexer GraphQL HTTP endpoint (e.g. `https://.../graphql`). When set, platforms are loaded and merged at startup.
-    pub myso_indexer_graphql_url: Option<String>,
-    /// Page size for `platforms(limit, offset)` pagination.
-    pub indexer_platforms_page_limit: u32,
-    /// If true, drop indexer platforms that have no URL under `platform_links_redirect_keys` in `links`.
-    pub require_redirect_uri_from_links: bool,
-    /// When set and non-empty, only `statusText` values in this list are kept (exact match after trim).
-    pub platform_status_allowlist: Option<Vec<String>>,
-    /// Applied when allowlist is None or empty: exclude these `statusText` values (default: Shutdown, Sunset).
-    pub platform_status_denylist: Vec<String>,
-    /// Ordered keys tried inside `links` JSON to find OAuth redirect / site URL.
-    pub platform_links_redirect_keys: Vec<String>,
     /// MySocial Auth issuer (e.g. https://auth.testnet.mysocial.network).
     pub mysocial_auth_issuer: Option<String>,
     /// MySocial Auth JWKS URI for JWT validation.
@@ -105,31 +90,7 @@ impl Config {
             allowed_audience_facebook: env::var("ALLOWED_AUDIENCE_FACEBOOK").ok(),
             allowed_audience_twitch: env::var("ALLOWED_AUDIENCE_TWITCH").ok(),
             auth_callback_url: env::var("AUTH_CALLBACK_URL").ok(),
-            allowed_clients_env: parse_allowed_clients_for_auth()?,
-            allowed_clients: Vec::new(),
-            myso_indexer_graphql_url: env::var("MYSO_INDEXER_GRAPHQL_URL").ok(),
-            indexer_platforms_page_limit: env::var("INDEXER_PLATFORMS_PAGE_LIMIT")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(200),
-            require_redirect_uri_from_links: env::var("REQUIRE_REDIRECT_URI_FROM_LINKS")
-                .ok()
-                .map(|s| {
-                    matches!(
-                        s.trim().to_ascii_lowercase().as_str(),
-                        "1" | "true" | "yes"
-                    )
-                })
-                .unwrap_or(false),
-            platform_status_allowlist: parse_comma_list_opt(env::var("PLATFORM_STATUS_ALLOWLIST").ok())?,
-            platform_status_denylist: parse_comma_list_with_default(
-                env::var("PLATFORM_STATUS_DENYLIST").ok(),
-                "Shutdown,Sunset",
-            )?,
-            platform_links_redirect_keys: parse_comma_list_with_default(
-                env::var("PLATFORM_LINKS_REDIRECT_KEYS").ok(),
-                "website,url",
-            )?,
+            allowed_clients: parse_allowed_clients_for_auth()?,
             mysocial_auth_issuer: env::var("MYSOCIAL_AUTH_ISSUER").ok(),
             mysocial_auth_jwks_uri: env::var("MYSOCIAL_AUTH_JWKS_URI").ok(),
             allowed_audience_mysocial: env::var("ALLOWED_AUDIENCE_MYSOCIAL").ok(),
@@ -183,7 +144,7 @@ impl Config {
                 for c in &self.allowed_clients {
                     if c.redirect_uri.trim().is_empty() {
                         anyhow::bail!(
-                            "Each allowed client must have redirect_uri in ALLOWED_CLIENTS or indexer links, or set AUTH_CALLBACK_URL as a global fallback (client_id {:?} has empty redirect_uri)",
+                            "Each allowed client must have redirect_uri in ALLOWED_CLIENTS, or set AUTH_CALLBACK_URL as a global fallback (client_id {:?} has empty redirect_uri)",
                             c.client_id
                         );
                     }
@@ -203,28 +164,6 @@ fn parse_allowed_clients_for_auth() -> Result<Vec<AllowedClient>> {
     };
     let clients: Vec<AllowedClient> = serde_json::from_str(&s).context("Invalid ALLOWED_CLIENTS JSON")?;
     Ok(clients)
-}
-
-fn parse_comma_list_opt(raw: Option<String>) -> Result<Option<Vec<String>>> {
-    let Some(s) = raw else {
-        return Ok(None);
-    };
-    let v: Vec<String> = s
-        .split(',')
-        .map(|x| x.trim().to_string())
-        .filter(|x| !x.is_empty())
-        .collect();
-    Ok(Some(v).filter(|x| !x.is_empty()))
-}
-
-fn parse_comma_list_with_default(raw: Option<String>, default: &str) -> Result<Vec<String>> {
-    let s = raw
-        .filter(|x| !x.trim().is_empty())
-        .unwrap_or_else(|| default.to_string());
-    Ok(s.split(',')
-        .map(|x| x.trim().to_string())
-        .filter(|x| !x.is_empty())
-        .collect())
 }
 
 /// OAuth `redirect_uri` for token exchange: prefer per-client URL, else global auth callback.
@@ -323,14 +262,7 @@ mod tests {
             allowed_audience_facebook: None,
             allowed_audience_twitch: None,
             auth_callback_url: None,
-            allowed_clients_env: vec![],
             allowed_clients: vec![],
-            myso_indexer_graphql_url: None,
-            indexer_platforms_page_limit: 200,
-            require_redirect_uri_from_links: false,
-            platform_status_allowlist: None,
-            platform_status_denylist: vec![],
-            platform_links_redirect_keys: vec![],
             mysocial_auth_issuer: None,
             mysocial_auth_jwks_uri: None,
             allowed_audience_mysocial: None,

@@ -1,7 +1,6 @@
 use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::Deserialize;
-use tracing::warn;
 
 use crate::config::Config;
 use crate::models::AuthExchangeResponse;
@@ -89,13 +88,6 @@ async fn exchange_google(
     let status = resp.status();
     let text = resp.text().await.context("Failed to read Google token response")?;
     if !status.is_success() {
-        warn!(
-            redirect_uri = %redirect_uri,
-            google_oauth_client_id = %client_id,
-            http_status = %status,
-            response_body = %text,
-            "Google token exchange rejected; redirect_uri must exactly match an entry under Authorized redirect URIs for this Google OAuth client"
-        );
         anyhow::bail!("Google token exchange failed ({}): {}", status, text);
     }
 
