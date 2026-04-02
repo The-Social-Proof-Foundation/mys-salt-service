@@ -18,6 +18,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use myso_salt_service::{
     config::Config,
     db::SaltStore,
+    indexer_platforms::{self, merge_allowed_clients},
     monitoring::Metrics,
     state::AppState,
     security::{SaltManager, jwt::JwtValidator, access_token::AccessTokenValidator},
@@ -37,7 +38,34 @@ async fn main() -> Result<()> {
     info!("Starting the MySocial Salt Service");
 
     // Load configuration
-    let config = Config::from_env()?;
+    let mut config = Config::from_env()?;
+
+    let http_for_indexer = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .context("Failed to build HTTP client for indexer")?;
+
+    let indexer_url_set = config
+        .myso_indexer_graphql_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .is_some();
+
+    if indexer_url_set {
+        let from_indexer =
+            indexer_platforms::fetch_allowed_clients_from_indexer(&http_for_indexer, &config)
+                .await?;
+        let env_clients = std::mem::take(&mut config.allowed_clients_env);
+        config.allowed_clients = merge_allowed_clients(from_indexer, env_clients);
+        info!(
+            count = config.allowed_clients.len(),
+            "Merged allowed clients from indexer and ALLOWED_CLIENTS"
+        );
+    } else {
+        config.allowed_clients = std::mem::take(&mut config.allowed_clients_env);
+    }
+
     config.validate()?;
 
     let config = Arc::new(config);
@@ -73,7 +101,7 @@ async fn main() -> Result<()> {
     ));
     let metrics = Arc::new(Metrics::new());
     let http_client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
+        .timeout(Duration::from_secs(15))
         .build()
         .context("Failed to build HTTP client")?;
 
