@@ -36,9 +36,24 @@ pub struct Config {
     pub allowed_audience_facebook: Option<String>,
     /// Canonical aud for Twitch access-token flow.
     pub allowed_audience_twitch: Option<String>,
-    /// Auth frontend OAuth callback URL (where Google/Apple redirect after login). Used for token exchange.
+    /// Auth frontend OAuth callback URL (where Google/Apple redirect after login). Used for token exchange fallback when a client has no `redirect_uri`.
     pub auth_callback_url: Option<String>,
+    /// OAuth clients from `ALLOWED_CLIENTS` env JSON (before merge with indexer).
+    pub allowed_clients_env: Vec<AllowedClient>,
+    /// Merged allowlist: indexer platforms plus env (env overrides on same `client_id`).
     pub allowed_clients: Vec<AllowedClient>,
+    /// MySo indexer GraphQL HTTP endpoint (e.g. `https://.../graphql`). When set, platforms are loaded and merged at startup.
+    pub myso_indexer_graphql_url: Option<String>,
+    /// Page size for `platforms(limit, offset)` pagination.
+    pub indexer_platforms_page_limit: u32,
+    /// If true, drop indexer platforms that have no URL under `platform_links_redirect_keys` in `links`.
+    pub require_redirect_uri_from_links: bool,
+    /// When set and non-empty, only `statusText` values in this list are kept (exact match after trim).
+    pub platform_status_allowlist: Option<Vec<String>>,
+    /// Applied when allowlist is None or empty: exclude these `statusText` values (default: Shutdown, Sunset).
+    pub platform_status_denylist: Vec<String>,
+    /// Ordered keys tried inside `links` JSON to find OAuth redirect / site URL.
+    pub platform_links_redirect_keys: Vec<String>,
     /// MySocial Auth issuer (e.g. https://auth.testnet.mysocial.network).
     pub mysocial_auth_issuer: Option<String>,
     /// MySocial Auth JWKS URI for JWT validation.
@@ -90,7 +105,31 @@ impl Config {
             allowed_audience_facebook: env::var("ALLOWED_AUDIENCE_FACEBOOK").ok(),
             allowed_audience_twitch: env::var("ALLOWED_AUDIENCE_TWITCH").ok(),
             auth_callback_url: env::var("AUTH_CALLBACK_URL").ok(),
-            allowed_clients: parse_allowed_clients_for_auth()?,
+            allowed_clients_env: parse_allowed_clients_for_auth()?,
+            allowed_clients: Vec::new(),
+            myso_indexer_graphql_url: env::var("MYSO_INDEXER_GRAPHQL_URL").ok(),
+            indexer_platforms_page_limit: env::var("INDEXER_PLATFORMS_PAGE_LIMIT")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(200),
+            require_redirect_uri_from_links: env::var("REQUIRE_REDIRECT_URI_FROM_LINKS")
+                .ok()
+                .map(|s| {
+                    matches!(
+                        s.trim().to_ascii_lowercase().as_str(),
+                        "1" | "true" | "yes"
+                    )
+                })
+                .unwrap_or(false),
+            platform_status_allowlist: parse_comma_list_opt(env::var("PLATFORM_STATUS_ALLOWLIST").ok())?,
+            platform_status_denylist: parse_comma_list_with_default(
+                env::var("PLATFORM_STATUS_DENYLIST").ok(),
+                "Shutdown,Sunset",
+            )?,
+            platform_links_redirect_keys: parse_comma_list_with_default(
+                env::var("PLATFORM_LINKS_REDIRECT_KEYS").ok(),
+                "website,url",
+            )?,
             mysocial_auth_issuer: env::var("MYSOCIAL_AUTH_ISSUER").ok(),
             mysocial_auth_jwks_uri: env::var("MYSOCIAL_AUTH_JWKS_URI").ok(),
             allowed_audience_mysocial: env::var("ALLOWED_AUDIENCE_MYSOCIAL").ok(),
@@ -134,8 +173,22 @@ impl Config {
             anyhow::bail!("ALLOWED_AUDIENCE_TWITCH must be set when TWITCH_CLIENT_ID is configured");
         }
 
-        if !self.allowed_clients.is_empty() && (self.auth_callback_url.is_none() || self.auth_callback_url.as_ref().map(|s| s.trim().is_empty()).unwrap_or(true)) {
-            anyhow::bail!("AUTH_CALLBACK_URL must be set when ALLOWED_CLIENTS is non-empty. Set to auth frontend OAuth callback (e.g. https://auth.testnet.mysocial.network/callback)");
+        if !self.allowed_clients.is_empty() {
+            let global_cb = self
+                .auth_callback_url
+                .as_ref()
+                .map(|s| !s.trim().is_empty())
+                .unwrap_or(false);
+            if !global_cb {
+                for c in &self.allowed_clients {
+                    if c.redirect_uri.trim().is_empty() {
+                        anyhow::bail!(
+                            "Each allowed client must have redirect_uri in ALLOWED_CLIENTS or indexer links, or set AUTH_CALLBACK_URL as a global fallback (client_id {:?} has empty redirect_uri)",
+                            c.client_id
+                        );
+                    }
+                }
+            }
         }
 
         Ok(())
@@ -151,3 +204,139 @@ fn parse_allowed_clients_for_auth() -> Result<Vec<AllowedClient>> {
     let clients: Vec<AllowedClient> = serde_json::from_str(&s).context("Invalid ALLOWED_CLIENTS JSON")?;
     Ok(clients)
 }
+
+fn parse_comma_list_opt(raw: Option<String>) -> Result<Option<Vec<String>>> {
+    let Some(s) = raw else {
+        return Ok(None);
+    };
+    let v: Vec<String> = s
+        .split(',')
+        .map(|x| x.trim().to_string())
+        .filter(|x| !x.is_empty())
+        .collect();
+    Ok(Some(v).filter(|x| !x.is_empty()))
+}
+
+fn parse_comma_list_with_default(raw: Option<String>, default: &str) -> Result<Vec<String>> {
+    let s = raw
+        .filter(|x| !x.trim().is_empty())
+        .unwrap_or_else(|| default.to_string());
+    Ok(s.split(',')
+        .map(|x| x.trim().to_string())
+        .filter(|x| !x.is_empty())
+        .collect())
+}
+
+/// OAuth `redirect_uri` for token exchange: prefer per-client URL, else global auth callback.
+pub fn oauth_redirect_uri_for_exchange<'a>(
+    client: &'a AllowedClient,
+    auth_callback_url: Option<&'a str>,
+) -> Option<&'a str> {
+    let u = client.redirect_uri.trim();
+    if !u.is_empty() {
+        return Some(u);
+    }
+    auth_callback_url.map(str::trim).filter(|s| !s.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use base64::Engine;
+
+    fn minimal_config(mut c: Config) -> Config {
+        c.master_seed_base64 = base64::engine::general_purpose::STANDARD.encode([0u8; 32]);
+        c.database_url = "postgresql://localhost/db".into();
+        c.allowed_audience_google = Some("g".into());
+        c.allowed_audience_apple = Some("a".into());
+        c
+    }
+
+    #[test]
+    fn validate_allows_empty_redirect_when_global_callback_set() {
+        let c = minimal_config(Config {
+            allowed_clients: vec![AllowedClient {
+                client_id: "p1".into(),
+                redirect_uri: "".into(),
+            }],
+            auth_callback_url: Some("https://auth.example/callback".into()),
+            ..empty_shell()
+        });
+        c.validate().unwrap();
+    }
+
+    #[test]
+    fn validate_requires_per_client_redirect_without_global() {
+        let c = minimal_config(Config {
+            allowed_clients: vec![AllowedClient {
+                client_id: "p1".into(),
+                redirect_uri: "".into(),
+            }],
+            auth_callback_url: None,
+            ..empty_shell()
+        });
+        assert!(c.validate().is_err());
+    }
+
+    #[test]
+    fn oauth_redirect_prefers_client_uri() {
+        let client = AllowedClient {
+            client_id: "x".into(),
+            redirect_uri: "https://app/cb".into(),
+        };
+        assert_eq!(
+            oauth_redirect_uri_for_exchange(&client, Some("https://global/cb")),
+            Some("https://app/cb")
+        );
+    }
+
+    #[test]
+    fn oauth_redirect_falls_back_to_global() {
+        let client = AllowedClient {
+            client_id: "x".into(),
+            redirect_uri: "".into(),
+        };
+        assert_eq!(
+            oauth_redirect_uri_for_exchange(&client, Some("https://global/cb")),
+            Some("https://global/cb")
+        );
+    }
+
+    fn empty_shell() -> Config {
+        Config {
+            database_url: String::new(),
+            master_seed_base64: String::new(),
+            port: 3000,
+            allowed_origins: vec![],
+            rate_limit_per_minute: 60,
+            log_level: "info".into(),
+            twitch_client_id: None,
+            twitch_client_secret: None,
+            facebook_app_secret: None,
+            facebook_app_id: None,
+            allowed_audience_google: None,
+            google_client_secret: None,
+            allowed_audience_apple: None,
+            apple_team_id: None,
+            apple_key_identifier: None,
+            apple_private_key: None,
+            allowed_audience_facebook: None,
+            allowed_audience_twitch: None,
+            auth_callback_url: None,
+            allowed_clients_env: vec![],
+            allowed_clients: vec![],
+            myso_indexer_graphql_url: None,
+            indexer_platforms_page_limit: 200,
+            require_redirect_uri_from_links: false,
+            platform_status_allowlist: None,
+            platform_status_denylist: vec![],
+            platform_links_redirect_keys: vec![],
+            mysocial_auth_issuer: None,
+            mysocial_auth_jwks_uri: None,
+            allowed_audience_mysocial: None,
+            jwt_signing_key: None,
+            jwt_issuer: None,
+        }
+    }
+}
+
